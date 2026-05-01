@@ -197,10 +197,11 @@ typedef struct dt_kern_path {
 	char *dkp_path;		       /* full name including path */
 } dt_kern_path_t;
 
-#define DT_DM_LOADED		0x1	/* module symbol and type data is loaded */
-#define DT_DM_KERNEL		0x2	/* module is associated with a kernel object */
-#define DT_DM_CTF_ARCHIVED	0x4	/* module found in a CTF archive */
-#define DT_DM_KERN_UNLOADED	0x8	/* module not loaded into the kernel */
+#define DT_DM_LOADED		0x01	/* module symbol and type data is loaded */
+#define DT_DM_KERNEL		0x02	/* module is associated with a kernel object */
+#define DT_DM_CTF_ARCHIVED	0x04	/* module found in a CTF archive */
+#define DT_DM_KERN_UNLOADED	0x08	/* module not loaded into the kernel */
+#define DT_DM_BTF_LOADED	0x10	/* module BTF data loaded */
 
 /*
  * Why do we need (only) 4 slots?  The maximum amount of string arguments to
@@ -305,7 +306,6 @@ struct dtrace_hdl {
 	char *dt_ctfa_path;	/* path to vmlinux.ctfa */
 	ctf_archive_t *dt_ctfa; /* ctf archive for the entire kernel tree */
 	char *dt_btf_path;	/* path to vmlinux.btf */
-	struct dt_btf *dt_shared_btf; /* BTF data for the kernel (shared) */
 	ctf_file_t *dt_shared_ctf; /* Handle to the shared CTF */
 	dt_htab_t *dt_kernpaths; /* hash table of dt_kern_path_t's */
 	dt_module_t *dt_exec;	/* pointer to executable module */
