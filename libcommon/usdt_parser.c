@@ -19,7 +19,6 @@
 #include "usdt_parser.h"
 
 size_t			usdt_maxcount = 2;
-size_t			usdt_maxsize = 256 * 1024 * 1024;
 
 _dt_printflike_(3, 4)
 void
@@ -131,9 +130,9 @@ usdt_copyin_block(int in, int out, int *ok)
 		abort();
 
 	/* Validate the data size. */
-	if (data->size >= usdt_maxsize) {
-		usdt_error(out, E2BIG, "data size %zi exceeds maximum %zi",
-			   data->size, usdt_maxsize);
+	if (data->size > DOF_MAXSZ) {
+		usdt_error(out, E2BIG, "data size %zi exceeds maximum %i",
+			   data->size, DOF_MAXSZ);
 		return NULL;
 	}
 
