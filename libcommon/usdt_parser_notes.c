@@ -472,6 +472,10 @@ parse_usdt_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		return -1;
 	}
 	prbt.fun = (char *)data->buf + fno;
+	if (memchr(prbt.fun, 0, data->size - fno) == NULL) {
+		usdt_error(out, EINVAL, "Unterminated function name");
+		return -1;
+	}
 	prbt.prb = p;
 	p += strlen(p) + 1;
 	if (p - note->desc > note->hdr->n_descsz) {
@@ -546,22 +550,22 @@ alloc_msg(int out, dof_parsed_info_t type, size_t len)
 
 	switch (type) {
 	case DIT_PROVIDER:
-		len += offsetof(dof_parsed_t, provider.name);
+		len += DIT_PROVIDER_HEADSZ;
 		break;
 	case DIT_PROBE:
-		len += offsetof(dof_parsed_t, probe.name);
+		len += DIT_PROBE_HEADSZ;
 		break;
 	case DIT_ARGS_NATIVE:
-		len += offsetof(dof_parsed_t, nargs.args);
+		len += DIT_ARGS_NATIVE_HEADSZ;
 		break;
 	case DIT_ARGS_XLAT:
-		len += offsetof(dof_parsed_t, xargs.args);
+		len += DIT_ARGS_XLAT_HEADSZ;
 		break;
 	case DIT_ARGS_MAP:
-		len += offsetof(dof_parsed_t, argmap.argmap);
+		len += DIT_ARGS_MAP_HEADSZ;
 		break;
 	case DIT_TRACEPOINT:
-		len += offsetof(dof_parsed_t, tracepoint.args);
+		len += DIT_TRACEPOINT_HEADSZ;
 		break;
 	default:
 		usdt_error(out, EINVAL, "Unknown dof_parsed_t type: %d", type);

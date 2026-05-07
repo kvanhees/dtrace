@@ -748,7 +748,7 @@ emit_probe(int out, dtrace_helper_probedesc_t *dhpb)
 	 * flags.
 	 */
 
-	msg_size = offsetof(dof_parsed_t, probe.name) +
+	msg_size = DIT_PROBE_HEADSZ +
 		   strlen(dhpb->dthpb_mod) + 1 +
 		   strlen(dhpb->dthpb_func) + 1 +
 		   strlen(dhpb->dthpb_name) + 1;
@@ -786,7 +786,7 @@ emit_probe(int out, dtrace_helper_probedesc_t *dhpb)
 		size_t	nargs_size;
 
 		nargs_size = strings_len(dhpb->dthpb_ntypes, dhpb->dthpb_nargc);
-		msg_size = offsetof(dof_parsed_t, nargs.args) + nargs_size;
+		msg_size = DIT_ARGS_NATIVE_HEADSZ + nargs_size;
 
 		msg = malloc(msg_size);
 		if (!msg)
@@ -808,8 +808,7 @@ emit_probe(int out, dtrace_helper_probedesc_t *dhpb)
 
 			xargs_size = strings_len(dhpb->dthpb_xtypes,
 						 dhpb->dthpb_xargc);
-			msg_size = offsetof(dof_parsed_t, xargs.args) +
-				   xargs_size;
+			msg_size = DIT_ARGS_XLAT_HEADSZ + xargs_size;
 
 			msg = malloc(msg_size);
 			if (!msg)
@@ -827,8 +826,7 @@ emit_probe(int out, dtrace_helper_probedesc_t *dhpb)
 			/* Then the mapping table. */
 
 			map_size = dhpb->dthpb_xargc * sizeof(int8_t);
-			msg_size = offsetof(dof_parsed_t, argmap.argmap) +
-				   map_size;
+			msg_size = DIT_ARGS_MAP_HEADSZ + map_size;
 
 			msg = malloc(msg_size);
 			if (!msg)
@@ -922,8 +920,7 @@ emit_provider(int out, dof_helper_t *dhp,
 	}
 
 	dhpb.dthpb_prov = strtab + prov->dofpv_name;
-	provider_msg_size = offsetof(dof_parsed_t, provider.name) +
-	    strlen(dhpb.dthpb_prov) + 1;
+	provider_msg_size = DIT_PROVIDER_HEADSZ + strlen(dhpb.dthpb_prov) + 1;
 
 	provider_msg = malloc(provider_msg_size);
 	if (!provider_msg) {

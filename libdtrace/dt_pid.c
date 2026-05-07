@@ -782,25 +782,40 @@ err:
 }
 
 /*
- * A quick check that a parsed DOF record read hasn't incurred a buffer overrun
- * and is of the type expected.
+ * Ensure that the buffer has enough data to read the record of the expected
+ * type.  Ensure that all records have at least 1 byte of payload data.
  */
 static int
 validate_dof_record(const char *path, const dof_parsed_t *parsed,
-		    dof_parsed_info_t expected, size_t buf_size,
+		    dof_parsed_info_t type, size_t headsz, size_t buf_size,
 		    size_t seen_size)
 {
-	if (buf_size < seen_size) {
+	size_t	data_size;
+
+	/* If we have read more than there is, we must always fail. */
+	if (buf_size < seen_size)
+		data_size = 0;
+	else
+		data_size = buf_size - seen_size;
+
+	if (data_size < headsz || data_size < parsed->size) {
 		dt_dprintf("DOF too small when adding probes (seen %zi bytes)\n",
 			   seen_size);
 		return 0;
 	}
 
-	if (parsed->type != expected) {
-		dt_dprintf("%s format invalid: expected %i, got %i\n", path,
-			   expected, parsed->type);
+	if (parsed->size <= headsz + 1) {
+		dt_dprintf("DOF record too small: expected %zi, got %zi\n",
+			   headsz, parsed->size);
 		return 0;
 	}
+
+	if (parsed->type != type) {
+		dt_dprintf("%s format invalid: expected %i, got %i\n", path,
+			   type, parsed->type);
+		return 0;
+	}
+
 	return 1;
 }
 
@@ -908,7 +923,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 		char *dof_buf = NULL, *p;
 		struct stat s;
 		char *path;
-		size_t dof_buf_size, seen_size = 0;
+		size_t dof_buf_size, seen_size = 0, payload_size;
 		uint64_t *dof_version;
 		char *prv, *mod, *fun, *prb;
 		dof_parsed_t *provider, *probe;
@@ -929,7 +944,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			goto per_mapping_err;
 
 		dof_buf = read_file(path, &dof_buf_size);
-		if (dof_buf == NULL)
+		if (dof_buf == NULL || dof_buf_size < sizeof(uint64_t))
 			goto per_mapping_err;
 		dof_version = (uint64_t *) dof_buf;
 		if (*dof_version != DOF_PARSED_VERSION) {
@@ -945,23 +960,42 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 		 * probe.
 		 */
 		provider = (dof_parsed_t *) p;
-		if (!validate_dof_record(path, provider, DIT_PROVIDER, dof_buf_size,
+		if (!validate_dof_record(path, provider, DIT_PROVIDER,
+					 DIT_PROVIDER_HEADSZ, dof_buf_size,
 					 seen_size))
 			goto parse_err;
 
+		/*
+		 * Ensure that a validly terminated string follows the record
+		 * header.
+		 */
 		prv = provider->provider.name;
+		payload_size = provider->size - DIT_PROVIDER_HEADSZ;
+		if (memchr(prv, '\0', payload_size) == NULL)
+			goto parse_err;
 
 		p += provider->size;
 		seen_size += provider->size;
 
 		probe = (dof_parsed_t *) p;
-		if (!validate_dof_record(path, probe, DIT_PROBE, dof_buf_size,
+		if (!validate_dof_record(path, probe, DIT_PROBE,
+					 DIT_PROBE_HEADSZ, dof_buf_size,
 					 seen_size))
 			goto parse_err;
 
 		mod = probe->probe.name;
+		payload_size = probe->size - DIT_PROBE_HEADSZ;
+		if (memchr(mod, '\0', payload_size) == NULL)
+			goto parse_err;
+
 		fun = mod + strlen(mod) + 1;
+		payload_size -= strlen(mod) + 1;
+		if (memchr(fun, '\0', payload_size) == NULL)
+			goto parse_err;
 		prb = fun + strlen(fun) + 1;
+		payload_size -= strlen(fun) + 1;
+		if (memchr(prb, '\0', payload_size) == NULL)
+			goto parse_err;
 
 		p += probe->size;
 		seen_size += probe->size;
@@ -973,6 +1007,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			dof_parsed_t *args = (dof_parsed_t *) p;
 
 			if (!validate_dof_record(path, args, DIT_ARGS_NATIVE,
+						 DIT_ARGS_NATIVE_HEADSZ,
 						 dof_buf_size, seen_size))
 				goto parse_err;
 
@@ -987,6 +1022,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			dof_parsed_t *args = (dof_parsed_t *) p;
 
 			if (!validate_dof_record(path, args, DIT_ARGS_XLAT,
+						 DIT_ARGS_XLAT_HEADSZ,
 						 dof_buf_size, seen_size))
 				goto parse_err;
 
@@ -999,6 +1035,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			args = (dof_parsed_t *) p;
 
 			if (!validate_dof_record(path, args, DIT_ARGS_MAP,
+						 DIT_ARGS_MAP_HEADSZ,
 						 dof_buf_size, seen_size))
 				goto parse_err;
 
@@ -1017,6 +1054,7 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			const prmap_t *pmp;
 
 			if (!validate_dof_record(path, tp, DIT_TRACEPOINT,
+						 DIT_TRACEPOINT_HEADSZ,
 						 dof_buf_size, seen_size))
 				goto parse_err;
 
@@ -1073,8 +1111,14 @@ dt_pid_create_usdt_probes_proc(dtrace_hdl_t *dtp, pid_t pid, dt_proc_t *dpr,
 			if (argmap)
 				psp.pps_argmap = argmap;
 
-			if (tp->tracepoint.args[0] != 0)
+			if (tp->tracepoint.args[0] != 0) {
 				psp.pps_sargv = tp->tracepoint.args;
+
+				payload_size = tp->size - DIT_TRACEPOINT_HEADSZ;
+				if (memchr(psp.pps_sargv, '\0',
+					   payload_size) == NULL)
+					goto parse_err;
+			}
 
 			dt_dprintf("providing %s:%s:%s:%s for pid %d @ %lx\n",
 				   psp.pps_prv, psp.pps_mod, psp.pps_fun,
