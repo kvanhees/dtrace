@@ -275,8 +275,8 @@ dof_slurp(int out, dof_hdr_t *dof, uint64_t ubase)
 		return -1;
 	}
 
-	if (dof->dofh_secsize == 0) {
-		usdt_error(out, EINVAL, "zero section header size");
+	if (dof->dofh_secsize != sizeof(dof_sec_t)) {
+		usdt_error(out, EINVAL, "incorrect section header size");
 		return -1;
 	}
 
