@@ -73,6 +73,10 @@ get_note(int out, usdt_data_t *data, ssize_t off, usdt_note_t *note)
 	}
 
 	note->name = (char *)data->buf + off;
+	if (memchr(note->name, '\0', sz) == NULL) {
+		usdt_error(out, EINVAL, "Unterminated name");
+		return -1;
+	}
 	off += ALIGN(sz, 4);
 
 	dt_dbg_usdt("ELF note '%s' (%d bytes)\n",
@@ -297,14 +301,19 @@ static int
 parse_prov_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		usdt_note_t *note)
 {
-	const char	*p = note->desc;
+	const char	*p = note->desc, *q;
 	dt_provider_t	prvt, *pvp;
 	const uint32_t	*vals;
 	uint32_t	probec;
 	int		i;
 
 	prvt.name = p;
-	p += ALIGN(strlen(p) + 1, 4);
+	q = memchr(prvt.name, '\0', note->hdr->n_descsz);
+	if (q == NULL) {
+		usdt_error(out, EINVAL, "Unterminated provider name");
+		return -1;
+	}
+	p += ALIGN(q -p + 1, 4);
 	if (p + 6 * sizeof(uint32_t) - note->desc > note->hdr->n_descsz) {
 		usdt_error(out, EINVAL, "Incomplete note data");
 		return -1;
