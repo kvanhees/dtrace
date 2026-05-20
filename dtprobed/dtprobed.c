@@ -420,9 +420,19 @@ static dof_parsed_t *
 usdt_read(pid_t pid, int in)
 {
 	dof_parsed_t *reply = usdt_parser_host_read(in, timeout);
+	const char *invalid;
 
 	if (!reply)
 		return NULL;
+
+	invalid = usdt_parsed_invalid(reply);
+	if (invalid != NULL) {
+		fuse_log(FUSE_LOG_WARNING, "%i: dtprobed: malformed parser output: %s\n",
+			 pid, invalid);
+		errno = EPROTO;
+		free(reply);
+		return NULL;
+	}
 
 	/*
 	 * Log errors.
@@ -436,6 +446,34 @@ usdt_read(pid_t pid, int in)
 	}
 
 	return reply;
+}
+
+static size_t
+usdt_data_total_size(const usdt_data_t *data)
+{
+	size_t total = 0;
+
+	for (; data != NULL; data = data->next) {
+		if (SIZE_MAX - total < data->size)
+			return SIZE_MAX;
+		total += data->size;
+	}
+
+	return total;
+}
+
+static int
+validate_parser_count(pid_t pid, const char *kind, size_t count, size_t limit)
+{
+	if (count > limit) {
+		fuse_log(FUSE_LOG_WARNING,
+			 "%i: dtprobed: malformed parser output: %s count %zi exceeds %zi\n",
+			 pid, kind, count, limit);
+		errno = EPROTO;
+		return -1;
+	}
+
+	return 0;
 }
 
 /*
@@ -934,11 +972,15 @@ process_dof(pid_t pid, int out, int in, dev_t dev, ino_t inum, dev_t exec_dev,
 	    int reparsing)
 {
 	dof_parsed_t *provider;
+	size_t max_items = usdt_data_total_size(data);
 	size_t i;
 	size_t tries = 0;
 	int gen = 0;
 	const char *errmsg;
 	dt_list_t accum = {0};
+
+	if (max_items == 0)
+		max_items = 1;
 
 	do {
 		errmsg = "DOF parser write failed";
@@ -968,6 +1010,11 @@ process_dof(pid_t pid, int out, int in, dev_t dev, ino_t inum, dev_t exec_dev,
 		}
 		if (provider->type != DIT_PROVIDER && provider->type != DIT_EOF)
 			goto err;
+		if (provider->type == DIT_PROVIDER &&
+		    validate_parser_count(pid, "provider probe",
+					  provider->provider.nprobes,
+					  max_items) < 0)
+			goto err;
 		break;
 	} while (!provider);
 
@@ -984,6 +1031,16 @@ process_dof(pid_t pid, int out, int in, dev_t dev, ino_t inum, dev_t exec_dev,
 
 			errmsg = "no probes in this provider, or parse state corrupt";
 			if (!probe || probe->type != DIT_PROBE)
+				goto err;
+			if (validate_parser_count(pid, "probe tracepoint",
+						  probe->probe.ntp,
+						  max_items) < 0 ||
+			    validate_parser_count(pid, "probe native arg",
+						  probe->probe.nargc,
+						  UINT8_MAX) < 0 ||
+			    validate_parser_count(pid, "probe translated arg",
+						  probe->probe.xargc,
+						  UINT8_MAX) < 0)
 				goto err;
 
 			if (_dtrace_debug) {

@@ -662,7 +662,19 @@ dof_stash_write_parsed(pid_t pid, dev_t dev, ino_t ino, dt_list_t *accum)
 		 * Provider: make new provider dir.
 		 */
 		case DIT_PROVIDER: {
+			const char *invalid;
+
 			state = accump->parsed->type;
+
+			invalid = usdt_parsed_invalid(accump->parsed);
+			if (invalid != NULL) {
+				fuse_log(FUSE_LOG_ERR,
+					 "dtprobed: PID %i, %lx/%lx: malformed parsed provider: %s\n",
+					 pid, dev, ino, invalid);
+				op = "parsed provider validation";
+				errno = EPROTO;
+				goto err_provider;
+			}
 
 			free(provpid_name);
 
@@ -689,6 +701,9 @@ dof_stash_write_parsed(pid_t pid, dev_t dev, ino_t ino, dt_list_t *accum)
 		 * out file, open new one, make hardlink to it.
 		 */
 		case DIT_PROBE: {
+			const char *invalid;
+			size_t payload_len;
+
 			assert(state == DIT_PROVIDER || state == DIT_PROBE ||
 			       state == DIT_TRACEPOINT);
 			state = accump->parsed->type;
@@ -705,12 +720,25 @@ dof_stash_write_parsed(pid_t pid, dev_t dev, ino_t ino, dt_list_t *accum)
 			if (err != 0)
 				goto err_provider;
 
+			invalid = usdt_parsed_invalid(accump->parsed);
+			if (invalid != NULL) {
+				fuse_log(FUSE_LOG_ERR,
+					 "dtprobed: PID %i, %lx/%lx: malformed parsed probe for %s: %s\n",
+					 pid, dev, ino, probe_err, invalid);
+				op = "parsed probe validation";
+				errno = EPROTO;
+				goto err_provider;
+			}
+
 			mod = accump->parsed->probe.name;
-			assert(accump->parsed->size > (mod - (char *) accump->parsed));
 			fun = mod + strlen(mod) + 1;
-			assert(accump->parsed->size > (fun - (char *) accump->parsed));
 			prb = fun + strlen(fun) + 1;
-			assert(accump->parsed->size >= (prb - (char *) accump->parsed));
+			payload_len = accump->parsed->size - DIT_PROBE_HEADSZ;
+			if ((size_t)(prb - mod) > payload_len) {
+				op = "probe name validation";
+				errno = EPROTO;
+				goto err_provider;
+			}
 
 			op = "probe name construction";
 			probe_err = this_provider->provider.name;
