@@ -729,7 +729,13 @@ helper_ioctl(fuse_req_t req, int cmd, void *arg,
 				 errmsg, sizeof(dof_helper_t), in_bufsz);
 			goto fuse_err;
 		}
+
 		memcpy(&userdata->dh, in_buf, sizeof(dof_helper_t));
+		if (memchr(userdata->dh.dofhp_mod, 0, DTRACE_MODNAMELEN) == NULL) {
+			fuse_log(FUSE_LOG_ERR, "%i: dtprobed: "
+				 "unterminated module name\n", pid);
+			goto fuse_err;
+		}
 
 		in.iov_base = (void *) userdata->dh.dofhp_dof;
 		in.iov_len = sizeof(dof_hdr_t);
