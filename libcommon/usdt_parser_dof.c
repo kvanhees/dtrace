@@ -469,6 +469,12 @@ validate_provider(int out, dof_hdr_t *dof, dof_sec_t *sec)
 		return -1;
 	}
 
+	if (prb_sec->dofs_entsize < sizeof(dof_probe_t)) {
+		usdt_error(out, EINVAL, "probe entry size %x smaller than %zi",
+			   prb_sec->dofs_entsize, sizeof(dof_probe_t));
+		return -1;
+	}
+
 	if (prb_sec->dofs_entsize & (sizeof(uintptr_t) - 1)) {
 		usdt_error(out, EINVAL, "misaligned entry size %x",
 			   prb_sec->dofs_entsize);

@@ -141,6 +141,7 @@ struct dt_probe {
 	const char	*mod;			/* module name */
 	const char	*fun;			/* function name (or NULL) */
 	const char	*prb;			/* probe name */
+	char		*prb_alloc;		/* allocated probe name */
 	uint32_t	ntp;			/* number of tracepoints */
 	uint32_t	off;			/* tracepoint offset */
 	uint8_t		is_enabled;		/* is-enabled probe (boolean) */
@@ -255,12 +256,14 @@ prb_del_probe(dt_probe_t *head, dt_probe_t *prp)
 	if (prp->fun == NULL) {
 		free(prp->xargs);
 		free(prp->xmap);
+		free(prp->prb_alloc);
 		free(prp);
 	} else {
 		dt_probe_t	*nxt;
 
 		do {
 			nxt = prp->next;
+			free(prp->prb_alloc);
 			free(prp);
 		} while ((prp = nxt) != NULL);
 	}
@@ -283,18 +286,58 @@ static dt_htab_ops_t pmap_htab_ops = {
  * Return -1 if end is reached before 'cnt' strings were found.
  */
 static ssize_t
+bounded_cstr_size(const char *str, const char *end)
+{
+	const char *nul;
+
+	if (str >= end)
+		return -1;
+
+	nul = memchr(str, '\0', end - str);
+	if (nul == NULL)
+		return -1;
+
+	return nul - str + 1;
+}
+
+static ssize_t
 strarray_size(uint8_t cnt, const char *str, const char *end, size_t skip)
 {
 	const char	*p = str;
 
 	while (cnt-- > 0) {
-		if (p >= end)
+		ssize_t len = bounded_cstr_size(p, end);
+
+		if (len < 0 || skip > (size_t)(end - (p + len)))
 			return -1;
 
-		p += strlen(p) + 1 + skip;
+		p += len + skip;
 	}
 
 	return p - str;
+}
+
+static char *
+decode_probe_name(const char *name, ssize_t len)
+{
+	char *copy, *dst;
+	const char *src, *end;
+
+	copy = malloc(len);
+	if (copy == NULL)
+		return NULL;
+
+	dst = copy;
+	end = name + len;
+	for (src = name; src < end; src++, dst++) {
+		if (src[0] == '_' && src + 1 < end && src[1] == '_') {
+			*dst = '-';
+			src++;
+		} else
+			*dst = *src;
+	}
+
+	return copy;
 }
 
 static int
@@ -302,6 +345,7 @@ parse_prov_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		usdt_note_t *note)
 {
 	const char	*p = note->desc, *q;
+	const char	*end = note->desc + note->hdr->n_descsz;
 	dt_provider_t	prvt, *pvp;
 	const uint32_t	*vals;
 	uint32_t	probec;
@@ -351,12 +395,17 @@ parse_prov_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		ssize_t		len;
 
 		p = (const char *)ALIGN((uintptr_t)p, 4);
+		len = bounded_cstr_size(p, end);
+		if (len < 0) {
+			usdt_error(out, EINVAL, "Incomplete note data");
+			return -1;
+		}
 		prbt.prv = pvp->name;
 		prbt.mod = dhp->dofhp_mod;
 		prbt.fun = NULL;
 		prbt.prb = p;
 		prbt.off = 0;
-		p += strlen(p) + 1;
+		p += len;
 		if (p + 2 * sizeof(uint8_t) - note->desc > note->hdr->n_descsz) {
 			usdt_error(out, EINVAL, "Incomplete note data");
 			return -1;
@@ -441,8 +490,11 @@ parse_usdt_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		usdt_note_t *note)
 {
 	const char	*p = note->desc;
+	const char	*end = note->desc + note->hdr->n_descsz;
 	uint64_t	off, fno;
 	dt_probe_t	prbt, *prp;
+	ssize_t		len;
+	char		*decoded_prb = NULL;
 
 	data = data->next;
 	if (data == NULL) {
@@ -460,12 +512,13 @@ parse_usdt_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 	fno = *(uint64_t *)p;
 	p += sizeof(uint64_t);
 
-	prbt.prv = p;
-	p += strlen(p) + 1;
-	if (p - note->desc > note->hdr->n_descsz) {
+	len = bounded_cstr_size(p, end);
+	if (len < 0) {
 		usdt_error(out, EINVAL, "Incomplete note data");
 		return -1;
 	}
+	prbt.prv = p;
+	p += len;
 	prbt.mod = dhp->dofhp_mod;
 	if (fno < data->base || (fno -= data->base) >= data->size) {
 		usdt_error(out, EINVAL, "Invalid function name offset");
@@ -476,33 +529,30 @@ parse_usdt_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		usdt_error(out, EINVAL, "Unterminated function name");
 		return -1;
 	}
-	prbt.prb = p;
-	p += strlen(p) + 1;
-	if (p - note->desc > note->hdr->n_descsz) {
+	len = bounded_cstr_size(p, end);
+	if (len < 0) {
 		usdt_error(out, EINVAL, "Incomplete note data");
 		return -1;
 	}
+	prbt.prb = p;
+	p += len;
 	prbt.off = off;
 
 	/*
-	 * If the probe name has encoded hyphens, perform in-place changing
-	 * from "__" into "-".
+	 * If the probe name has encoded hyphens, decode "__" into "-" in a
+	 * private copy so that the parser never mutates libelf-owned buffers.
 	 */
 	if (strstr(prbt.prb, "__") != NULL) {
-		char		*q;
-		const char	*s = prbt.prb, *e = p;
-
-		for (q = (char *)s; s < e; s++, q++) {
-			if (s[0] == '_' && s[1] == '_') {
-				*q = '-';
-				s++;
-			} else if (s > q)
-				*q = *s;
+		if ((decoded_prb = decode_probe_name(prbt.prb, len)) == NULL) {
+			usdt_error(out, ENOMEM, "Failed to allocate probe name");
+			return -1;
 		}
+		prbt.prb = decoded_prb;
 	}
 
 	if ((prp = dt_htab_lookup(prbmap, &prbt)) == NULL) {
 		if ((prp = malloc(sizeof(dt_probe_t))) == NULL) {
+			free(decoded_prb);
 			usdt_error(out, ENOMEM, "Failed to allocate probe");
 			return -1;
 		}
@@ -511,24 +561,31 @@ parse_usdt_note(int out, dof_helper_t *dhp, usdt_data_t *data,
 		prp->mod = prbt.mod;
 		prp->fun = prbt.fun;
 		prp->prb = prbt.prb;
+		prp->prb_alloc = decoded_prb;
 		prp->off = prbt.off;
 		dt_htab_insert(prbmap, prp);
 	} else {
 		usdt_error(out, EEXIST, "Duplicate probe: %s:%s:%s:%s",
 			   prbt.prv, prbt.mod, prbt.fun, prbt.prb);
+		free(decoded_prb);
 		return -1;
 	}
 
 	prp->next = NULL;
 	prp->is_enabled = (note->hdr->n_type == _USDT_EN_NOTE_TYPE ? 1 : 0);
 	prp->ntp = 0;
-	prp->sargc = *p++;
-	prp->sargs = p;
-	p += strlen(p) + 1;
-	if (p - note->desc > note->hdr->n_descsz) {
+	if (p >= end) {
 		usdt_error(out, EINVAL, "Incomplete note data");
 		return -1;
 	}
+	prp->sargc = *p++;
+	prp->sargs = p;
+	len = bounded_cstr_size(p, end);
+	if (len < 0) {
+		usdt_error(out, EINVAL, "Incomplete note data");
+		return -1;
+	}
+	p += len;
 
 	dt_dbg_usdt("[usdt]   %s:%s:%s:%s (nargc %d, offset %lx)\n",
 		    prp->prv, prp->mod, prp->fun, prp->prb, prp->nargc,
