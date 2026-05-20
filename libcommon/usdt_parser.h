@@ -248,6 +248,14 @@ int usdt_parse_notes(int out, dof_helper_t *dhp, usdt_data_t *data);
  */
 
 /*
+ * Validate the basic shape of a parsed parser message.
+ *
+ * Returns NULL if the message is well-formed, or a short constant error string
+ * describing the first detected problem.
+ */
+const char *usdt_parsed_invalid(const dof_parsed_t *msg);
+
+/*
  * Write something to the parser pipe OUT.
  *
  * Returns 0 on success or a positive errno value on error.

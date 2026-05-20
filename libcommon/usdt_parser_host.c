@@ -15,6 +15,99 @@
 #include <libelf.h>
 #include "usdt_parser.h"
 
+static int
+payload_has_n_cstrings(const char *str, size_t len, size_t nstr)
+{
+	const char *end = str + len;
+
+	while (nstr-- > 0) {
+		const char *nul;
+
+		if (str >= end)
+			return 0;
+
+		nul = memchr(str, '\0', end - str);
+		if (nul == NULL)
+			return 0;
+
+		str = nul + 1;
+	}
+
+	return 1;
+}
+
+const char *
+usdt_parsed_invalid(const dof_parsed_t *msg)
+{
+	size_t payload_len;
+	const char *payload;
+
+	if (msg == NULL)
+		return "null parsed message";
+
+	if (msg->size < offsetof(dof_parsed_t, type))
+		return "parsed message smaller than header";
+
+	switch (msg->type) {
+	case DIT_PROVIDER:
+		if (msg->size < DIT_PROVIDER_HEADSZ + 1)
+			return "provider record too small";
+		if (!payload_has_n_cstrings(msg->provider.name,
+					    msg->size - DIT_PROVIDER_HEADSZ, 1))
+			return "unterminated provider name";
+		break;
+	case DIT_PROBE:
+		if (msg->size < DIT_PROBE_HEADSZ + 3)
+			return "probe record too small";
+		if (!payload_has_n_cstrings(msg->probe.name,
+					    msg->size - DIT_PROBE_HEADSZ, 3))
+			return "unterminated probe name";
+		break;
+	case DIT_TRACEPOINT:
+		if (msg->size < DIT_TRACEPOINT_HEADSZ + 1)
+			return "tracepoint record too small";
+		if (!payload_has_n_cstrings(msg->tracepoint.args,
+					    msg->size - DIT_TRACEPOINT_HEADSZ, 1))
+			return "unterminated tracepoint args";
+		break;
+	case DIT_ERR:
+		if (msg->size < DIT_ERR_HEADSZ + 1)
+			return "error record too small";
+		if (!payload_has_n_cstrings(msg->err.err,
+					    msg->size - DIT_ERR_HEADSZ, 1))
+			return "unterminated parser error";
+		break;
+	case DIT_ARGS_NATIVE:
+		if (msg->size < DIT_ARGS_NATIVE_HEADSZ)
+			return "native-args record too small";
+		payload = msg->nargs.args;
+		payload_len = msg->size - DIT_ARGS_NATIVE_HEADSZ;
+		if (payload_len > 0 && payload[payload_len - 1] != '\0')
+			return "unterminated native arg string";
+		break;
+	case DIT_ARGS_XLAT:
+		if (msg->size < DIT_ARGS_XLAT_HEADSZ)
+			return "translated-args record too small";
+		payload = msg->xargs.args;
+		payload_len = msg->size - DIT_ARGS_XLAT_HEADSZ;
+		if (payload_len > 0 && payload[payload_len - 1] != '\0')
+			return "unterminated translated arg string";
+		break;
+	case DIT_ARGS_MAP:
+		if (msg->size < DIT_ARGS_MAP_HEADSZ)
+			return "arg-map record too small";
+		break;
+	case DIT_EOF:
+		if (msg->size != offsetof(dof_parsed_t, provider.nprobes))
+			return "bad EOF record size";
+		break;
+	default:
+		return "unknown parsed record type";
+	}
+
+	return NULL;
+}
+
 /*
  * Write BUF to the parser pipe OUT.
  *
@@ -27,7 +120,7 @@ usdt_parser_write_one(int out, const void *buf_, size_t size)
 	char *buf = (char *) buf_;
 
 	for (i = 0; i < size; ) {
-		size_t ret;
+		ssize_t ret;
 
 		ret = write(out, buf + i, size - i);
 		if (ret < 0) {
@@ -59,7 +152,7 @@ usdt_parser_host_write(int out, const dof_helper_t *dh, const usdt_data_t *data)
 
 	/* Write dof_helper_ structure. */
 	if ((err = usdt_parser_write_one(out, (const char *)dh,
-					 sizeof(*dh))) < 0)
+					 sizeof(*dh))) != 0)
 		return err;
 
 	/* Count and write nunmber of blocks that follow. */
@@ -67,19 +160,19 @@ usdt_parser_host_write(int out, const dof_helper_t *dh, const usdt_data_t *data)
 		cnt++;
 
 	if ((err = usdt_parser_write_one(out, (const char *)&cnt,
-					 sizeof(cnt))) < 0)
+					 sizeof(cnt))) != 0)
 		return err;
 
 	/* Write the blocks (for each, offset, size, and data). */
 	for (blk = data; blk != NULL; blk = blk->next) {
 		if ((err = usdt_parser_write_one(out, (const char *)&blk->base,
-						 sizeof(blk->base))) < 0)
+						 sizeof(blk->base))) != 0)
 			return err;
 		if ((err = usdt_parser_write_one(out, (const char *)&blk->size,
-						 sizeof(blk->size))) < 0)
+						 sizeof(blk->size))) != 0)
 			return err;
 		if ((err = usdt_parser_write_one(out, (const char *)blk->buf,
-						 blk->size)) < 0)
+						 blk->size)) != 0)
 			return err;
 	}
 
@@ -118,7 +211,7 @@ usdt_parser_host_read(int in, int timeout)
 	 * longer than expected is better than no read at all.
 	 */
 	for (i = 0, sz = offsetof(dof_parsed_t, type); i < sz;) {
-		size_t ret;
+		ssize_t ret;
 		struct timespec start, end;
 		int no_adjustment = 0;
 		long timeout_msec = timeout * MILLISEC;
@@ -153,8 +246,13 @@ usdt_parser_host_read(int in, int timeout)
 		 * that we've done the initial size read...
 		 */
 		if (i < offsetof(dof_parsed_t, type) &&
-		    i + ret >= offsetof(dof_parsed_t, type))
+		    i + (size_t)ret >= offsetof(dof_parsed_t, type)) {
 			sz = reply->size;
+			if (sz < offsetof(dof_parsed_t, type) || sz > DOF_MAXSZ) {
+				errno = EPROTO;
+				goto err;
+			}
+		}
 
 		/* Allocate more room if needed for the reply.  */
 		if (sz > sizeof(dof_parsed_t)) {
@@ -164,7 +262,8 @@ usdt_parser_host_read(int in, int timeout)
 			if (!new_reply)
 				goto err;
 
-			memset(((char *) new_reply) + i + ret, 0, new_reply->size - (i + ret));
+			memset(((char *) new_reply) + i + ret, 0,
+			       new_reply->size - (i + ret));
 			reply = new_reply;
 		}
 
@@ -177,4 +276,3 @@ err:
 	free(reply);
 	return NULL;
 }
-
