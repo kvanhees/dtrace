@@ -15,6 +15,8 @@
 #include <dtrace/dof.h>
 #include <dtrace/helpers.h>
 
+#define DOF_MAXSZ	(256 * 1024 * 1024)
+
 /*
  * Data transfer unit for the DOF parser.
  */
