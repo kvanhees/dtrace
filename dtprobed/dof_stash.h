@@ -21,6 +21,8 @@ typedef struct dof_parsed_list {
 
 int dof_stash_init(const char *statedir);
 
+int is_component_unsafe(const char *s);
+
 int dof_stash_push_parsed(dt_list_t *accum, dof_parsed_t *parsed);
 int dof_stash_write_parsed(pid_t pid, dev_t dev, ino_t ino, dt_list_t *accum);
 void dof_stash_free(dt_list_t *accum);
