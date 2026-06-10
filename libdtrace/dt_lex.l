@@ -50,6 +50,7 @@ static size_t dt_input(char *buf, size_t max_size);
 RGX_AGG		"@"[a-zA-Z_][0-9a-zA-Z_]*
 RGX_PSPEC	[-$:a-zA-Z_.?*\\\[\]!][-$:0-9a-zA-Z_.`?*\\\[\]!]*
 RGX_IDENT	([a-zA-Z_`][0-9a-zA-Z_`]*)|([0-9][0-9a-zA-Z_]*`[0-9a-zA-Z_`]*)
+RGX_SCOPE_IDENT	[0-9a-zA-Z_][0-9a-zA-Z_]*(\.[0-9a-zA-Z_]+)+``?[0-9a-zA-Z_]+
 RGX_INT		([0-9]+|0[xX][0-9A-Fa-f]+)[uU]?[lL]?[lL]?
 RGX_FP		([0-9]+("."?)[0-9]*|"."[0-9]+)((e|E)("+"|-)?[0-9]+)?[fFlL]?
 RGX_WS		[\f\n\r\t\v ]
@@ -299,6 +300,7 @@ if (yypcb->pcb_token != 0) {
 			return DT_TOK_INT;
 		}
 
+<S0>{RGX_SCOPE_IDENT} |
 <S0,SIDENT>{RGX_IDENT}	{
 			return id_or_type(yytext);
 		}
@@ -727,6 +729,9 @@ id_or_type(const char *s)
 	dt_decl_t *ddp = yypcb->pcb_dstack.ds_decl;
 	int c0, c1;
 	dt_ident_t *idp;
+
+	if (dt_scope_parse(s, NULL, NULL) < 0)
+		xyerror(D_SYNTAX, "syntax error near \"%s\"\n", s);
 
 	if ((s = yylval.l_str = strdup(s)) == NULL)
 		longjmp(yypcb->pcb_jmpbuf, EDT_NOMEM);
