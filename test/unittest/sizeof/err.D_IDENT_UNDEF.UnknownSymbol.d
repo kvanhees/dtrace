@@ -16,6 +16,6 @@
 
 BEGIN
 {
-	printf("sizeof(`): %d\n", sizeof(`));
+	printf("sizeof(`unknown_symbol): %d\n", sizeof(`unknown_symbol));
 	exit(0);
 }
