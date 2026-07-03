@@ -1332,11 +1332,13 @@ dtrace_close(dtrace_hdl_t *dtp)
 	for (i = 1; i < dtp->dt_cpp_argc; i++)
 		free(dtp->dt_cpp_argv[i]);
 
-	while ((dirp = dt_list_next(&dtp->dt_lib_path)) != NULL) {
-		dt_list_delete(&dtp->dt_lib_path, dirp);
+	while ((dirp = dt_list_next(&dtp->dt_dlib_path)) != NULL) {
+		dt_list_delete(&dtp->dt_dlib_path, dirp);
 		free(dirp->dir_path);
 		free(dirp);
 	}
+
+	dt_user_path_destroy(dtp);
 
 	free(dtp->dt_cpp_argv);
 	free(dtp->dt_cpp_path);

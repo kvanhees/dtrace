@@ -358,7 +358,8 @@ struct dtrace_hdl {
 	int dt_cpp_argc;	/* count of initialized cpp(1) arguments */
 	int dt_cpp_args;	/* size of dt_cpp_argv[] array */
 	char *dt_ld_path;	/* pathname of ld(1) to invoke if needed */
-	dt_list_t dt_lib_path;	/* linked-list forming library search path */
+	dt_list_t dt_dlib_path;	/* D library search path (list) */
+	dt_list_t dt_user_path;	/* userspace module search path (list) */
 	char *dt_module_path;	/* pathname of kernel module root */
 	dt_version_t dt_kernver;/* kernel version, used in the libpath */
 	char *dt_dofstash_path;	/* Path to the DOF stash.  */
