@@ -359,7 +359,7 @@ dt_opt_libdir(dtrace_hdl_t *dtp, const char *arg, uintptr_t option)
 		return dt_set_errno(dtp, EDT_NOMEM);
 	}
 
-	dt_list_append(&dtp->dt_lib_path, dp);
+	dt_list_append(&dtp->dt_dlib_path, dp);
 	return 0;
 }
 
@@ -541,7 +541,7 @@ dt_opt_stdc(dtrace_hdl_t *dtp, const char *arg, uintptr_t option)
 static int
 dt_opt_syslibdir(dtrace_hdl_t *dtp, const char *arg, uintptr_t option)
 {
-	dt_dirpath_t *dp = dt_list_next(&dtp->dt_lib_path);
+	dt_dirpath_t *dp = dt_list_next(&dtp->dt_dlib_path);
 	char *path;
 
 	if (arg == NULL)

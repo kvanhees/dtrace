@@ -620,7 +620,7 @@ dt_compile(dtrace_hdl_t *dtp, int context, dtrace_probespec_t pspec, void *arg,
 		return NULL;
 	}
 
-	if (dt_list_next(&dtp->dt_lib_path) != NULL && dt_load_libs(dtp) != 0)
+	if (dt_list_next(&dtp->dt_dlib_path) != NULL && dt_load_libs(dtp) != 0)
 		return NULL; /* errno is set for us */
 
 	ctf_discard(dtp->dt_cdefs->dm_ctfp);
@@ -803,7 +803,7 @@ dt_construct(dtrace_hdl_t *dtp, dt_probe_t *prp, uint_t cflags, dt_ident_t *idp)
 		return NULL;
 	}
 
-	if (dt_list_next(&dtp->dt_lib_path) != NULL && dt_load_libs(dtp) != 0)
+	if (dt_list_next(&dtp->dt_dlib_path) != NULL && dt_load_libs(dtp) != 0)
 		return NULL;
 
 	ctf_discard(dtp->dt_cdefs->dm_ctfp);

@@ -1232,7 +1232,7 @@ dt_load_libs(dtrace_hdl_t *dtp)
 
 	dtp->dt_cflags |= DTRACE_C_NOLIBS;
 
-	for (dirp = dt_list_next(&dtp->dt_lib_path); dirp != NULL;
+	for (dirp = dt_list_next(&dtp->dt_dlib_path); dirp != NULL;
 	     dirp = dt_list_next(dirp)) {
 		char *kdir_path;
 

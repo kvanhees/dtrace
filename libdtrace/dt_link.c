@@ -513,7 +513,7 @@ dtrace_program_link(dtrace_hdl_t *dtp, dtrace_prog_t *pgp, uint_t dflags,
 		    "failed to write %s: %s", file, strerror(errno));
 
 	if (!dtp->dt_lazyload) {
-		dt_dirpath_t *libdir = dt_list_next(&dtp->dt_lib_path);
+		dt_dirpath_t *libdir = dt_list_next(&dtp->dt_dlib_path);
 		const char *fmt = "%s%s -o %s -r --version-script=%s /dev/fd/%d %s";
 		const char *emu = "";
 
