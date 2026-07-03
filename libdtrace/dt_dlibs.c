@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -1232,7 +1232,7 @@ dt_load_libs(dtrace_hdl_t *dtp)
 
 	dtp->dt_cflags |= DTRACE_C_NOLIBS;
 
-	for (dirp = dt_list_next(&dtp->dt_lib_path); dirp != NULL;
+	for (dirp = dt_list_next(&dtp->dt_dlib_path); dirp != NULL;
 	     dirp = dt_list_next(dirp)) {
 		char *kdir_path;
 

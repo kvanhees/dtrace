@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2004, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -15,9 +15,12 @@ extern "C" {
 #endif
 
 extern dt_module_t *dt_module_create(dtrace_hdl_t *, const char *);
+extern dt_module_t *dt_module_create_user(dtrace_hdl_t *, const char *);
+extern void dt_user_path_destroy(dtrace_hdl_t *);
 
 extern dt_module_t *dt_module_lookup_by_name(dtrace_hdl_t *, const char *);
 extern dt_module_t *dt_module_lookup_by_ctf(dtrace_hdl_t *, ctf_file_t *);
+extern int dt_module_sym_iter(const dt_module_t *, proc_sym_f *, void *);
 
 extern ctf_file_t *dt_module_getctf(dtrace_hdl_t *, dt_module_t *);
 extern dt_ident_t *dt_module_extern(dtrace_hdl_t *, dt_module_t *,
