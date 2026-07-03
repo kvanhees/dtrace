@@ -45,6 +45,171 @@ dt_kern_module_find_btf(dtrace_hdl_t *dtp, dt_module_t *dmp);
 static void
 dt_kern_module_find_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp);
 
+typedef struct dt_path {
+	dt_list_t		list;
+	struct dt_hentry	he;
+	const char		*str;
+} dt_path_t;
+
+static uint32_t
+dt_path_hval(const dt_path_t *path)
+{
+	return str2hval(path->str, 0);
+}
+
+static int
+dt_path_cmp(const dt_path_t *p, const dt_path_t *q)
+{
+	return strcmp(p->str, q->str);
+}
+
+DEFINE_HE_STD_LINK_FUNCS(dt_path, dt_path_t, he)
+DEFINE_HTAB_STD_OPS(dt_path)
+
+static int
+dt_user_path_add(dtrace_hdl_t *dtp, dt_htab_t *h, char *s)
+{
+	dt_path_t	tmpl, *path;
+
+	tmpl.str = s;
+	if (dt_htab_lookup(h, &tmpl) != NULL) {
+		free(s);
+		return 0;
+	}
+
+	path = malloc(sizeof(dt_path_t));
+	if (path == NULL)
+		goto fail;
+
+	memset(path, 0, sizeof(dt_path_t));
+	path->str = s;
+	if (dt_htab_insert(h, path) != 0) {
+		free(path);
+		goto fail;
+	}
+
+	dt_list_append(&dtp->dt_user_path, path);
+
+	return 0;
+
+fail:
+	free(s);
+	return -1;
+}
+
+static int
+dt_user_path_add_env(dtrace_hdl_t *dtp, dt_htab_t *h, const char *env)
+{
+	char	*str, *end;
+
+	str = getenv(env);
+	if (str == NULL)
+		return 0;
+
+	for (;;) {
+		end = strchr(str, ':');
+		if (end == NULL) {
+			if (*str == '\0')
+				if (dt_user_path_add(dtp, h, strdup(".")) == -1)
+					return -1;
+
+			if (dt_user_path_add(dtp, h, strdup(str)) == -1)
+				return -1;
+
+			break;
+		}
+
+		if (end == str) {
+			if (dt_user_path_add(dtp, h, strdup(".")) == -1)
+				return -1;
+		} else
+			if (dt_user_path_add(dtp, h, strndup(str, end - str)) == -1)
+				return -1;
+
+		str = end + 1;
+	}
+
+	return 0;
+}
+
+static int
+dt_user_path_init(dtrace_hdl_t *dtp)
+{
+	dt_htab_t	*h = dt_htab_create(&dt_path_htab_ops);
+	FILE		*fp;
+	char		*buf = NULL;
+	size_t		len = 0;
+	char		*str, *end;
+	int		rc = 0;
+
+	/* Add paths from $LD_LIBRARY_PATH. */
+	if (dt_user_path_add_env(dtp, h, "LD_LIBRARY_PATH") != 0)
+		goto fail;
+
+	/* Add paths from ld.so.cache (using ldconfig -p output). */
+	fp = popen("/sbin/ldconfig -p", "r");
+	if (fp == NULL)
+		goto fail;
+
+	while (getline(&buf, &len, fp) != -1) {
+		/* We are interested in lines like: <something> => /path */
+		str = strstr(buf, "=>");
+		if (str == NULL)
+			continue;
+
+		str += 2;
+		while (isspace(*str))
+			str++;
+
+		end = str + strcspn(str, "\n");
+		while (end > str && isspace(end[-1]))
+			end--;
+		*end = '\0';
+
+		end = strrchr(str, '/');
+		if (end == NULL)
+			continue;
+
+		if (dt_user_path_add(dtp, h, strndup(str, end == str ? 1 : end - str)) == -1) {
+			rc = -1;
+			break;
+		}
+	}
+
+	free(buf);
+	pclose(fp);
+
+	if (rc == -1)
+		goto fail;
+
+	/* Add paths from $PATH. */
+	if (dt_user_path_add_env(dtp, h, "PATH") != 0)
+		goto fail;
+
+	/* Always add . in case it wasn't added yet. */
+	if (dt_user_path_add(dtp, h, strdup(".")) == -1)
+		goto fail;
+
+	dt_htab_destroy(h);
+	return 0;
+
+fail:
+	dt_htab_destroy(h);
+	return -1;
+}
+
+void
+dt_user_path_destroy(dtrace_hdl_t *dtp)
+{
+	dt_path_t	*path;
+
+	while ((path = dt_list_next(&dtp->dt_user_path)) != NULL) {
+		dt_list_delete(&dtp->dt_user_path, path);
+		free((char *)path->str);
+		free(path);
+	}
+}
+
 static uint32_t
 dt_module_hval(const dt_module_t *mod)
 {
@@ -164,6 +329,75 @@ dt_module_create(dtrace_hdl_t *dtp, const char *name)
 	dmp->dm_dtp = dtp;
 
 	return dmp;
+}
+
+/*
+ * Create a userspace module for an ELF object.  Userspace module names are
+ * resolved based on the LD_LIBRARY_PATH, ld.so.cache entries, and PATH.
+ * Module loading is lazy, as it is for all other modules.
+ */
+dt_module_t *
+dt_module_create_user(dtrace_hdl_t *dtp, const char *name)
+{
+	dt_module_t	*dmp;
+	char		*file = NULL;
+
+	if (name == NULL || name[0] == '\0') {
+		dt_set_errno(dtp, EINVAL);
+		return NULL;
+	}
+
+	if (dt_list_empty(&dtp->dt_user_path))
+		dt_user_path_init(dtp);
+	if (!dt_list_empty(&dtp->dt_user_path)) {
+		dt_path_t	*path;
+
+		for (path = dt_list_next(&dtp->dt_user_path); path != NULL;
+		     path = dt_list_next(path)) {
+			if (asprintf(&file, "%s/%s", path->str, name) == -1) {
+				dt_set_errno(dtp, ENOMEM);
+				return NULL;
+			}
+			if (access(file, R_OK) == 0)
+				break;
+
+			free(file);
+			file = NULL;
+		}
+
+		if (file == NULL) {
+			dt_set_errno(dtp, ENOENT);
+			return NULL;
+		}
+	}
+
+	if (strlen(name) >= DTRACE_MODNAMELEN ||
+	    strlen(file) >= sizeof(dmp->dm_file)) {
+		dt_set_errno(dtp, ENAMETOOLONG);
+		goto fail;
+	}
+
+	dmp = dt_module_lookup_by_name(dtp, name);
+	if (dmp != NULL) {
+		/* Do not turn a kernel or built-in type module into a user module. */
+		if (dmp->dm_flags & DT_DM_KERNEL || dmp == dtp->dt_cdefs ||
+		    dmp == dtp->dt_ddefs ||
+		    (dmp->dm_file[0] != '\0' && strcmp(dmp->dm_file, file) != 0)) {
+			dt_set_errno(dtp, EEXIST);
+			goto fail;
+		}
+	} else if ((dmp = dt_module_create(dtp, name)) == NULL) {
+		dt_set_errno(dtp, EDT_NOMEM);
+		goto fail;
+	}
+
+	strlcpy(dmp->dm_file, file, sizeof(dmp->dm_file));
+	free(file);
+	return dmp;
+
+fail:
+	free(file);
+	return NULL;
 }
 
 dt_module_t *
@@ -393,15 +627,21 @@ dt_module_load(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	if (dmp->dm_flags & DT_DM_LOADED)
 		return 0; /* module is already loaded */
 
-	/* Load BTF data for the module. */
-	dt_kern_module_find_btf(dtp, dmp);
-
 	/*
-	 * First find out where the module is, and preliminarily load its CTF.
-	 * If this fails, we don't care: the problem will be detected in
-	 * dt_module_init_elf().
+	 * A non-kernel module with a known file was explicitly created as a
+	 * userspace module.  Its CTF, if any, is in that ELF object; do not let
+	 * kernel module discovery reclassify it as an unloaded kernel module.
 	 */
-	dt_kern_module_find_ctf(dtp, dmp);
+	if ((dmp->dm_flags & DT_DM_KERNEL) || dmp->dm_file[0] == '\0') {
+		/* Load BTF data for the kernel module. */
+		dt_kern_module_find_btf(dtp, dmp);
+
+		/*
+		 * Find where the kernel module is and preliminarily load its CTF.
+		 * If this fails, dt_module_init_elf() reports the error below.
+		 */
+		dt_kern_module_find_ctf(dtp, dmp);
+	}
 
 	/*
 	 * Modules not found in the CTF archive, including non-kernel modules,
@@ -2062,6 +2302,32 @@ dtrace_symbol_type(dtrace_hdl_t *dtp, const GElf_Sym *symp,
 out:
 	tip->dtt_object = dmp->dm_name;
 	return 0;
+}
+
+int
+dt_module_sym_iter(const dt_module_t *dmp, proc_sym_f *func, void *arg)
+{
+	GElf_Sym	sym;
+	uint_t		i;
+	int		rv = 0;
+
+	for (i = 0; i < dmp->dm_aslen; i++) {
+		const char	*name;
+
+		if (dmp->dm_ops == &dt_modops_64)
+			dt_module_symgelf64(
+			    ((const Elf64_Sym **)dmp->dm_asmap)[i], &sym);
+		else
+			dt_module_symgelf32(
+			    ((const Elf32_Sym **)dmp->dm_asmap)[i], &sym);
+
+		name = (const char *)dmp->dm_strtab.cts_data + sym.st_name;
+
+		if ((rv = func(arg, &sym, name)) != 0)
+			break;
+	}
+
+	return rv;
 }
 
 static dtrace_objinfo_t *
