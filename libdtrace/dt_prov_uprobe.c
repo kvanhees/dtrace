@@ -37,6 +37,7 @@
 #include "dt_dctx.h"
 #include "dt_cg.h"
 #include "dt_list.h"
+#include "dt_module.h"
 #include "dt_provider_tp.h"
 #include "dt_probe.h"
 #include "dt_program.h"
@@ -398,6 +399,50 @@ static int populate_usdt(dtrace_hdl_t *dtp)
 			       NULL) == NULL)
 		return -1;			/* errno already set */
 
+	return 0;
+}
+
+static int provide(dtrace_hdl_t *dtp, const dtrace_probedesc_t *pdp)
+{
+	dt_provider_t	*prv = dt_provider_lookup(dtp, pdp->prv);
+	dt_module_t	*dmp;
+	dt_uprobe_t	*upp;
+	GElf_Sym	sym;
+	int		flags;
+
+	if (prv == NULL)
+		return 0;
+
+	if (dt_gmatch("return", pdp->prb))
+		flags = PP_IS_RETURN;
+	else if (dt_gmatch("entry", pdp->prb))
+		flags = 0;
+	else
+		return 0;
+
+	dmp = dt_module_create_user(dtp, pdp->mod);
+	if (dmp == NULL)
+		return 0;
+
+	if (dtrace_lookup_by_name(dtp, pdp->mod, pdp->fun, &sym, NULL) == -1)
+		return 0;
+
+	upp = dt_zalloc(dtp, sizeof(dt_uprobe_t));
+	if (upp == NULL)
+		return 0;
+
+	upp->fn = strdup(dmp->dm_file);
+	upp->off = sym.st_value;
+	upp->fd = -1;
+	upp->pid = -1;
+	upp->refcntr_off = 0;
+	upp->flags = flags;
+
+	if (dt_probe_insert(dtp, prv, pdp->prv, pdp->mod, pdp->fun, pdp->prb, upp) != NULL)
+		return 1;
+
+	free(upp->fn);
+	free(upp);
 	return 0;
 }
 
@@ -1390,6 +1435,16 @@ static int trampoline(dt_pcb_t *pcb, uint_t exitlbl)
 	 */
 	dt_cg_tramp_copy_regs(pcb);
 
+	if (!dt_list_empty(&uprp->stmts)) {
+		/* Populate probe arguments.  */
+		if (upp->flags & PP_IS_RETURN)
+			dt_cg_tramp_copy_rval_from_regs(pcb);
+		else
+			dt_cg_tramp_copy_args_from_regs(pcb, 1);
+
+		dt_cg_tramp_call_clauses(pcb, uprp, DT_ACTIVITY_ACTIVE);
+	}
+
 	/*
 	 * pid probes.
 	 *
@@ -1542,7 +1597,8 @@ static int uprobe_create(dtrace_hdl_t *dtp, const dt_uprobe_t *upp,
 	attr.uprobe_path = (uint64_t)upp->fn;
 	attr.probe_offset = upp->off;
 
-	return dt_perf_event_open(&attr, upp->pid, -1, -1, 0);
+	return dt_perf_event_open(&attr, upp->pid, upp->pid == -1 ? 0 : -1,
+				  -1, 0);
 }
 
 static int attach(dtrace_hdl_t *dtp, const dt_probe_t *uprp, int bpf_fd)
@@ -1720,6 +1776,7 @@ dt_provimpl_t	dt_uprobe = {
 	.name		= prvname,
 	.prog_type	= BPF_PROG_TYPE_KPROBE,
 	.populate	= &populate,
+	.provide	= &provide,
 	.load_prog	= &dt_bpf_prog_load,
 	.trampoline	= &trampoline,
 	.attach		= &attach,
