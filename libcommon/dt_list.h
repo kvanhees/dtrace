@@ -19,6 +19,7 @@ typedef struct dt_list {
 
 #define	dt_list_prev(elem)	((void *)(((dt_list_t *)(elem))->dl_prev))
 #define	dt_list_next(elem)	((void *)(((dt_list_t *)(elem))->dl_next))
+#define dt_list_empty(elem)	(dt_list_next(elem) == NULL)
 
 #define dt_in_list(l, e)	(dt_list_next(l) == (e) || dt_list_prev(e))
 
