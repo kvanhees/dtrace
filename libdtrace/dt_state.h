@@ -21,6 +21,8 @@ typedef enum dt_state_elem {
 	DT_STATE_ACTIVITY = 0,		/* activity state of the session */
 	DT_STATE_BEGANON,		/* cpu BEGIN probe executed on */
 	DT_STATE_ENDEDON,		/* cpu END probe executed on */
+	DT_STATE_NS_DEV,		/* PID namespace device */
+	DT_STATE_NS_INO,		/* PID namespace inode */
 	DT_STATE_SPEC_DROPS,		/* speculation buffer drops */
 	DT_STATE_SPEC_BUSY,		/* all speculation buffers are busy */
 	DT_STATE_SPEC_UNAVAIL,		/* no available speculation buffer */
