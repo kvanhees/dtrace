@@ -1,0 +1,35 @@
+# Python bindings integration
+
+PYTHON_SRC_DIR := bindings/python
+PYTHON_BINDINGS_OUT := $(objdir)/bindings/python
+PYTHON_BINDINGS_STAMP := $(PYTHON_BINDINGS_OUT)/.built
+PYTHON_SITEARCH ?= $(shell $(PYTHON) -c 'import sysconfig; print(sysconfig.get_path("platlib"))')
+
+ifeq ($(WITH_PYTHON),y)
+TARGETS += bindings-python
+PHONIES += bindings-python install-python
+
+bindings-python: $(PYTHON_BINDINGS_STAMP)
+
+$(PYTHON_BINDINGS_STAMP): $(objdir)/libdtrace.so \
+	$(wildcard $(PYTHON_SRC_DIR)/src/*.c) \
+	$(PYTHON_SRC_DIR)/setup.py \
+	$(PYTHON_SRC_DIR)/pyproject.toml
+	$(call describe-target,PYTHON,$(PYTHON_BINDINGS_OUT))
+	mkdir -p $(PYTHON_BINDINGS_OUT)
+	cd $(PYTHON_SRC_DIR) && \
+		DTRACE_OBJDIR="$(abspath $(objdir))" $(PYTHON) setup.py build_ext \
+	    --build-lib $(abspath $(PYTHON_BINDINGS_OUT)) \
+	    --build-temp $(abspath $(PYTHON_BINDINGS_OUT))/temp
+	touch $@
+
+install:: install-python
+
+install-python: $(PYTHON_BINDINGS_STAMP)
+	$(call describe-install-target,$(PYTHON_SITEARCH),$(notdir $(wildcard $(PYTHON_BINDINGS_OUT)/dtrace*.so)))
+	mkdir -p $(DESTDIR)$(PYTHON_SITEARCH)
+	install -m 755 $(PYTHON_BINDINGS_OUT)/dtrace*.so $(DESTDIR)$(PYTHON_SITEARCH)
+endif
+
+clean::
+	rm -rf $(PYTHON_BINDINGS_OUT)

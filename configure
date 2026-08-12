@@ -112,6 +112,7 @@ EOF
         make help-overrides-header help-overrides-option
         cat >&2 <<'EOF'
 --with-systemd=[yes/no]		Install the systemd unit files (default: yes)
+--with-python=[yes/no]		Build the Python bindings (default: yes)
 EOF
         echo >&2
         make help-overrides
@@ -199,6 +200,8 @@ for option in "$@"; do
         --kernel-obj-suffix=*) write_make_var KERNELBLDNAME "$option";;
         --with-systemd|--with-systemd=y*) write_make_var WITH_SYSTEMD "y";;
         --with-systemd=n*|--without-systemd) write_make_var WITH_SYSTEMD "";;
+        --with-python|--with-python=y*) write_make_var WITH_PYTHON "y";;
+        --with-python=n*|--without-python) write_make_var WITH_PYTHON "";;
         HAVE_ELF_GETSHDRSTRNDX=*) write_config_var ELF_GETSHDRSTRNDX "$option";;
         --with-libctf=*) write_config_var LIBCTF "$option";;
         HAVE_LIBCTF=*) write_config_var LIBCTF "$option";;
@@ -245,4 +248,3 @@ cat build/.config/*.h > build/config.h
 cat build/.config/*.mk > build/config.mk
 
 exit 0
-
