@@ -243,7 +243,11 @@ static int attach(dtrace_hdl_t *dtp, const dt_probe_t *prp, int bpf_fd)
 			close(fd);
 		}
 		free(spec);
-		if (rc == -1)
+		/*
+		 * Multiple handles in a process mean we may have BEGIN/END
+		 * uprobe events already.
+		 * */
+		if (rc == -1 && errno != EEXIST)
 			return -ENOENT;
 
 		/* open format file */

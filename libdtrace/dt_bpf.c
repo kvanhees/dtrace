@@ -25,8 +25,6 @@
 #include <dt_btf.h>
 #include <port.h>
 
-static boolean_t	dt_gmap_done = 0;
-
 #define BPF_CG_LICENSE	"GPL";
 
 int
@@ -1076,11 +1074,11 @@ int
 dt_bpf_gmap_create(dtrace_hdl_t *dtp)
 {
 	/* If we already created the global maps, return success. */
-	if (dt_gmap_done)
+	if (dtp->dt_gmap_done)
 		return 0;
 
 	/* Mark global maps creation as completed. */
-	dt_gmap_done = 1;
+	dtp->dt_gmap_done = 1;
 
 #define CREATE_MAP(name) \
 	if (gmap_create_##name(dtp) == -1) \
