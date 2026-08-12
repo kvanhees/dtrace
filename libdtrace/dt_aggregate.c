@@ -18,6 +18,7 @@
 #include <port.h>
 #include <dt_aggregate.h>
 #include <dt_bpf.h>
+#include <dt_math.h>
 
 typedef struct dt_ahashent {
 	struct dt_ahashent *dtahe_prev;		/* prev on hash chain */

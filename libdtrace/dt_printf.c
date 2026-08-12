@@ -16,6 +16,7 @@
 
 #include <dt_impl.h>
 #include <dt_aggregate.h>
+#include <dt_math.h>
 #include <dt_module.h>
 #include <dt_printf.h>
 #include <dt_string.h>
