@@ -29,6 +29,9 @@
 # By default, do not build with 32-on-64 support.
 %define glibc32 %{nil}
 
+# Directory in which to install the DTrace PCP PMDA.
+%global pcp_targetdir %{?pcp_targetdir}%{!?pcp_targetdir:/var/lib/pcp/pmdas/dtrace}
+
 # Enable it for non-ARM64 builds excpet for OL10.
 # ARM64 does not support 32-on-64 either.
 %ifnarch aarch64
@@ -41,6 +44,7 @@
 %global _lto_cflags %{nil}
 
 %bcond_without python
+%bcond_without pcp
 
 BuildRequires: rpm
 Name:         dtrace
@@ -146,6 +150,18 @@ Python extension module providing access to libdtrace.
 
 %endif
 
+%if %{with pcp} && %{with python}
+%package -n pcp-pmda-dtrace
+Summary:      PCP PMDA for DTrace
+Requires:     python3-dtrace = %{version}-%{release}
+Requires:     python3-pcp
+Group:        Applications/System
+
+%description -n pcp-pmda-dtrace
+Performance Co-Pilot PMDA for exposing DTrace data as metrics.
+
+%endif
+
 Installed in /usr/lib64/dtrace/testsuite.
 
 'make check' here is just like 'make check' in the source tree, except that
@@ -170,7 +186,15 @@ make -j $(getconf _NPROCESSORS_ONLN) %{bpfc} %{maybe_use_fuse2} %{?with_python:W
 mkdir -p $RPM_BUILD_ROOT/usr/sbin
 make DESTDIR=$RPM_BUILD_ROOT VERSION=%{version} \
      HDRPREFIX="$RPM_BUILD_ROOT/usr/include" \
+     PMDA_OBJDIR="$RPM_BUILD_ROOT%{pcp_targetdir}" \
      install install-test %{?with_python:install-python}      PYTHON=%{__python3}
+
+%if %{without pcp}
+rm -rf "$RPM_BUILD_ROOT%{pcp_targetdir}"
+%endif
+%if %{without python}
+rm -rf "$RPM_BUILD_ROOT%{pcp_targetdir}"
+%endif
 
 %if "%{?dist}" == ".el7"
 sed -i '/^ProtectSystem=/d; /^ProtectControlGroups=/d; /^RuntimeDirectory/d;' $RPM_BUILD_ROOT/usr/lib/systemd/system/dtprobed.service
@@ -254,6 +278,11 @@ systemctl start dtprobed || :
 %defattr(-,root,root,-)
 %{python3_sitearch}/dtrace*.so
 %doc bindings/python/README.md
+%endif
+%if %{with pcp} && %{with python}
+%files -n pcp-pmda-dtrace
+%defattr(-,root,root,-)
+%{pcp_targetdir}
 %endif
 %files testsuite
 %defattr(-,root,root,-)
