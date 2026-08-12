@@ -1,0 +1,56 @@
+# Oracle Linux DTrace.
+# Copyright (c) 2026, Oracle and/or its affiliates.
+# Licensed under the Universal Permissive License v 1.0 as shown at
+# http://oss.oracle.com/licenses/upl.
+
+PMDA_NAME := dtrace
+PMDA_OBJDIR := $(DESTDIR)/var/lib/pcp/pmdas/$(PMDA_NAME)
+PMDA_AUTOSTART_OBJDIR := $(PMDA_OBJDIR)/autostart.d
+PMDA_EXAMPLE_OBJDIR := $(PMDA_OBJDIR)/examples
+
+PMDA_EXEC_SCRIPTS := Install Remove pmdadtrace.python
+PMDA_DATA_FILES := README.md dtrace.conf
+PMDA_AUTOSTART_SRC := $(wildcard pcp/autostart.d/*)
+PMDA_AUTOSTART_FILES := $(notdir $(PMDA_AUTOSTART_SRC))
+PMDA_EXAMPLE_SRC := $(wildcard pcp/examples/*)
+PMDA_EXAMPLE_FILES := $(notdir $(PMDA_EXAMPLE_SRC))
+
+PHONIES += install-pmda-$(PMDA_NAME) install-pmda
+
+install:: install-pmda
+
+install-pmda:: install-pmda-$(PMDA_NAME)
+
+install-pmda-$(PMDA_NAME)::
+	$(call describe-install-target,$(PMDA_OBJDIR),$(PMDA_EXEC_SCRIPTS) $(PMDA_DATA_FILES))
+	mkdir -p $(PMDA_OBJDIR) $(PMDA_AUTOSTART_OBJDIR)
+	for f in $(PMDA_EXEC_SCRIPTS); do \
+		install -m 755 pcp/$$f $(PMDA_OBJDIR); \
+	done
+	for f in $(PMDA_DATA_FILES); do \
+		install -m 644 pcp/$$f $(PMDA_OBJDIR); \
+	done
+ifneq ($(PMDA_AUTOSTART_FILES),)
+	$(call describe-install-target,$(PMDA_AUTOSTART_OBJDIR),$(PMDA_AUTOSTART_FILES))
+	mkdir -p $(PMDA_OBJDIR) $(PMDA_AUTOSTART_OBJDIR)
+	for f in $(PMDA_AUTOSTART_FILES); do \
+		mode=644; \
+		case $$f in \
+			*.d) mode=755 ;; \
+		*) ;; \
+		esac; \
+		install -m $$mode pcp/autostart.d/$$f $(PMDA_AUTOSTART_OBJDIR); \
+	done
+endif
+ifneq ($(PMDA_EXAMPLE_FILES),)
+	$(call describe-install-target,$(PMDA_EXAMPLE_OBJDIR),$(PMDA_EXAMPLE_FILES))
+	mkdir -p $(PMDA_OBJDIR) $(PMDA_EXAMPLE_OBJDIR)
+	for f in $(PMDA_EXAMPLE_FILES); do \
+		mode=644; \
+		case $$f in \
+			*.d) mode=755 ;; \
+		*) ;; \
+		esac; \
+		install -m $$mode pcp/examples/$$f $(PMDA_EXAMPLE_OBJDIR); \
+	done
+endif
