@@ -693,6 +693,9 @@ dt_btf_to_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp, dt_btf_t *btf)
 	ctf_dict_t	*ctf;
 	ctf_encoding_t	enc = { CTF_INT_SIGNED, 0, 0 };
 
+	if (dmp == NULL && dtp->dt_shared_ctf)
+		return dtp->dt_shared_ctf;
+
 	ctf = ctf_create(&dtp->dt_ctferr);
 	if (ctf == NULL)
 		return NULL;
@@ -764,6 +767,68 @@ out:
 }
 #endif
 
+static dt_btf_t *dt_shared_btf = NULL;
+#ifdef HAVE_LIBCTF
+static ctf_dict_t *dt_shared_ctf = NULL;
+#endif
+static pthread_mutex_t dt_shared_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int dt_shared_refcnt = 0;
+
+static int
+dt_shared_get(dtrace_hdl_t *dtp, dt_module_t *dmp)
+{
+	pthread_mutex_lock(&dt_shared_mutex);
+	if (!dt_shared_btf)
+		dt_shared_btf = dt_btf_load_file(dtp, "/sys/kernel/btf/vmlinux");
+	if (dt_shared_btf) {
+		dt_shared_refcnt++;
+		dtp->dt_shared_btf = dmp->dm_btf = dt_shared_btf;
+#ifdef HAVE_LIBCTF
+		if (!dt_shared_ctf) {
+			ctf_dict_t *ctf = dt_btf_to_ctf(dtp, NULL, dt_shared_btf);
+
+			if (ctf)
+				dtp->dt_shared_ctf = dt_shared_ctf = dmp->dm_ctfp = ctf;
+		} else {
+			dtp->dt_shared_ctf = dmp->dm_ctfp = dt_shared_ctf;
+		}
+#endif
+	}
+	pthread_mutex_unlock(&dt_shared_mutex);
+	if (!dt_shared_btf)
+		return -1;
+	return 0;
+}
+
+void
+dt_shared_put(dtrace_hdl_t *dtp)
+{
+	int shared;
+
+	pthread_mutex_lock(&dt_shared_mutex);
+	shared = dtp->dt_shared_btf && dtp->dt_shared_btf == dt_shared_btf;
+	if (shared && --dt_shared_refcnt != 0)
+		goto out;
+
+	dt_btf_destroy(dtp, dtp->dt_shared_btf);
+	dtp->dt_shared_btf = NULL;
+	if (shared)
+		dt_shared_btf = NULL;
+
+#ifdef HAVE_LIBCTF
+	if (shared) {
+		ctf_close(dt_shared_ctf);
+		dt_shared_ctf = NULL;
+	} else {
+		ctf_close(dtp->dt_shared_ctf);
+	}
+	dtp->dt_shared_ctf = NULL;
+#endif
+
+out:
+	pthread_mutex_unlock(&dt_shared_mutex);
+}
+
 dt_btf_t *
 dt_btf_load_module(dtrace_hdl_t *dtp, dt_module_t *dmp)
 {
@@ -773,6 +838,13 @@ dt_btf_load_module(dtrace_hdl_t *dtp, dt_module_t *dmp)
 
 	if (dmp->dm_btf)
 		return dmp->dm_btf;
+
+	/* Share only the system-default vmlinux BTF. */
+	if (dtp->dt_btf_path == NULL &&
+	    strcmp(dmp->dm_name, "vmlinux") == 0) {
+		if (dt_shared_get(dtp, dmp) == 0)
+			return dmp->dm_btf;
+	}
 
 	/*
 	 * Default: /sys/kernel/btf/<module>
@@ -899,9 +971,12 @@ dt_btf_lookup_name_kind(dtrace_hdl_t *dtp, dt_module_t *dmp, const char *name,
 	if (strcmp(name, "void") == 0)
 		return 0;
 
-	/* Ensure the shared BTF is loaded. */
-	if (!dtp->dt_shared_btf)
+	/* Ensure the vmlinux BTF base is loaded before considering a module. */
+	if (!dtp->dt_shared_btf) {
 		dt_btf_load_module(dtp, dtp->dt_exec);
+		if (!dtp->dt_shared_btf)
+			return -ENOENT;
+	}
 
 	/* If the module does not have BTF data yet, try to load it. */
 	if (!btf) {
