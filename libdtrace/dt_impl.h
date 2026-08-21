@@ -374,6 +374,7 @@ struct dtrace_hdl {
 	uint_t dt_destructive;	/* boolean:  set if destructive actions found */
 	uint_t dt_active;	/* boolean:  set once tracing is active */
 	uint_t dt_stopped;	/* boolean:  set once tracing is stopped */
+	uint_t dt_gmaps_done;	/* boolean:  set once global BPF maps exist */
 	processorid_t dt_beganon; /* CPU that executed BEGIN probe (if any) */
 	processorid_t dt_endedon; /* CPU that executed END probe (if any) */
 	void *dt_beginendargs;	/* args for child running BEGIN and END probes */
