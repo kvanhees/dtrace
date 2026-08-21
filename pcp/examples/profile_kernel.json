@@ -1,0 +1,11 @@
+{
+  "name": "profile_kernel",
+  "defines": { "RUNTIME_MAX": 60, "STACKS_MAX": 512 },
+  "autostart": true,
+  "separator": ",",
+  "exitonly": true,
+  "options": {
+    "bufsize": "16m",
+    "aggsize": "8m"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "syscall_counts",
+  "autostart": true,
+  "options": {
+    "bufsize": "16m",
+    "aggsize": "8m"
+  }
+}

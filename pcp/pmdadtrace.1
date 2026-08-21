@@ -1,0 +1,135 @@
+.TH PMDADTRACE 1 "August 2026" "Performance Co-Pilot" "PMDA"
+.SH NAME
+\f3pmdadtrace\f1 \- DTrace performance metrics domain agent
+.SH SYNOPSIS
+\f3$PCP_PMDAS_DIR/dtrace/Install\f1
+.br
+\f3pmstore dtrace.control.register\f1 \f2json\f1
+.SH DESCRIPTION
+\f3pmdadtrace\f1 is a Performance Co-Pilot (PCP) PMDA that runs DTrace
+programs and exports their aggregations as PCP metrics. It is started by
+\f3pmcd\f1(1) after installation; it is not normally invoked directly.
+.PP
+Scripts may be loaded from the autostart directory when the PMDA starts, or
+registered dynamically by writing a JSON object to
+\f3dtrace.control.register\f1 with \f3pmstore\f1(1). The PMDA uses the
+libdtrace Python bindings and therefore requires DTrace and those bindings to
+be installed.
+.SH INSTALLATION
+Install the PMDA as root:
+.PP
+.EX
+# cd $PCP_PMDAS_DIR/dtrace
+# ./Install
+.EE
+.PP
+The installation registers the PMDA with \f3pmcd\f1. Check that it is
+available with:
+.PP
+.EX
+$ pminfo dtrace
+.EE
+.SH DYNAMIC SCRIPTS
+The value written to \f3dtrace.control.register\f1 must be a JSON object with
+the required string members \f3name\f1 and \f3program\f1. For example:
+.PP
+.EX
+$ pmstore dtrace.control.register '{
+  "name":"by_pid",
+   "program":"syscall:::entry /pid == $1/ { @calls = count(); }",
+   "args":["1234"], "autostart":true}'
+.EE
+.PP
+The optional members are:
+.TP
+\f3args\f1
+An array of strings supplied as positional D-script macro arguments. The
+first element is \f3$1\f1, the second is \f3$2\f1, and so on. The PMDA
+supplies the script name as \f3$0\f1. Use \f3$$1\f1 when the value must be
+interpreted as a D string token.
+.TP
+\f3autostart\f1
+A boolean. If true, start the script immediately.
+.TP
+\f3options\f1
+An object of libdtrace \f3setopt\f1 options and values, for example
+\f3{"aggsize":"4m", "quiet":true}\f1.
+.TP
+\f3compile\f1
+An object of compile-time options. \f3zdefs:true\f1 is equivalent to the
+DTrace \f3-Z\f1 option.
+.TP
+\f3defines\f1
+Either an object mapping C preprocessor macro names to values, or an array of
+\f3NAME\f1 and \f3NAME=VALUE\f1 strings. This enables C preprocessing.
+.TP
+\f3pid\f1
+A positive process ID. The PMDA attaches to that process before compiling the
+program, so the program can use \f3$target\f1.
+.TP
+\f3command\f1
+A shell-quoted command string. The PMDA creates this command under DTrace
+control, analogous to \f3dtrace -c\f1, and makes its process ID available as
+\f3$target\f1. \f3command\f1 and \f3pid\f1 are mutually exclusive.
+.TP
+\f3separator\f1
+The string used to join aggregation keys in PCP instance names. The default
+is \f3.\f1; \f3,\f1 is required for stack data consumed by the PCP Flame
+Graph panel.
+.TP
+\f3exitonly\f1
+A boolean. If true, aggregation data is published only after the DTrace
+session stops.
+.TP
+\f3top\f1, \f3bottom\f1
+Mutually exclusive non-negative limits selecting the largest or smallest
+aggregation entries to export.
+.PP
+\f3args\f1 applies to the D program at compile time. It is unrelated to
+\f3command\f1, whose arguments are for the target process.
+.PP
+Registered scripts can be stopped, restarted, or removed with:
+.PP
+.EX
+$ pmstore dtrace.control.stop by_pid
+$ pmstore dtrace.control.start by_pid
+$ pmstore dtrace.control.unregister by_pid
+.EE
+.SH AUTOSTART SCRIPTS
+Place a D program ending in \f3.d\f1 in
+\f3$PCP_PMDAS_DIR/dtrace/autostart/\f1. A matching \f3.json\f1 file can
+contain the optional members described above; \f3name\f1 defaults to the
+basename of the D program. Reload the directory with:
+.PP
+.EX
+$ pmstore dtrace.control.reload 1
+.EE
+.SH METRICS
+\f3dtrace.scripts\f1 contains an instance domain for registered scripts,
+including their state, autostart flag, last error, and running time.
+\f3dtrace.scripts.data.\f1\f2script\f1\f3.\f1\f2aggregation\f1 metrics
+contain exported DTrace aggregation values. Each aggregation key becomes a
+PCP instance. Script names are sanitized for use in PCP metric names, and
+names that sanitize to the same value cannot both be registered.
+.SH SECURITY
+Dynamic registration runs DTrace programs with the PMDA's privileges. By
+default it is permitted only for root. Configure the root-owned
+\f3$PCP_PMDAS_DIR/dtrace/dtrace.conf\f1 file to enable authenticated access
+for specific PCP users. Do not disable authentication unless every client
+with permission to store PMDA metrics is trusted.
+.SH FILES
+.TP
+\f3$PCP_PMDAS_DIR/dtrace/pmdadtrace.python\f1
+The PMDA implementation.
+.TP
+\f3$PCP_PMDAS_DIR/dtrace/dtrace.conf\f1
+Dynamic-script authorization policy.
+.TP
+\f3$PCP_PMDAS_DIR/dtrace/autostart/\f1
+Autostart D programs and their optional JSON metadata.
+.TP
+\f3$PCP_LOG_DIR/pmcd/dtrace.log\f1
+PMDA diagnostic log.
+.SH SEE ALSO
+\f3dtrace\f1(8), \f3pmcd\f1(1), \f3pminfo\f1(1), \f3pmstore\f1(1), and
+\f3PCPIntro\f1(1).

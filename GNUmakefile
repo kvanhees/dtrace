@@ -109,6 +109,7 @@ WITH_SYSTEMD = y
 PYTHON ?= python3
 PYTHON_BINDINGS_AVAILABLE := $(shell $(PYTHON) -c 'import os, sysconfig, setuptools; assert os.path.isfile(os.path.join(sysconfig.get_path("include"), "Python.h"))' >/dev/null 2>&1 && echo y)
 WITH_PYTHON ?= $(PYTHON_BINDINGS_AVAILABLE)
+WITH_PCP ?= y
 TARGETS =
 
 DTRACE ?= $(objdir)/dtrace

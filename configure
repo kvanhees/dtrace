@@ -113,6 +113,7 @@ EOF
         cat >&2 <<'EOF'
 --with-systemd=[yes/no]		Install the systemd unit files (default: yes)
 --with-python=[yes/no]		Build the Python bindings (default: enabled when prerequisites are present)
+--with-pcp=[yes/no]		Install the PCP PMDA (default: yes)
 EOF
         echo >&2
         make help-overrides
@@ -202,6 +203,8 @@ for option in "$@"; do
         --with-systemd=n*|--without-systemd) write_make_var WITH_SYSTEMD "";;
         --with-python|--with-python=y*) write_make_var WITH_PYTHON "y";;
         --with-python=n*|--without-python) write_make_var WITH_PYTHON "";;
+        --with-pcp|--with-pcp=y*) write_make_var WITH_PCP "y";;
+        --with-pcp=n*|--without-pcp) write_make_var WITH_PCP "";;
         HAVE_ELF_GETSHDRSTRNDX=*) write_config_var ELF_GETSHDRSTRNDX "$option";;
         --with-libctf=*) write_config_var LIBCTF "$option";;
         HAVE_LIBCTF=*) write_config_var LIBCTF "$option";;
