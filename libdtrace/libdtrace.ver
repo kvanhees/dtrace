@@ -1,6 +1,6 @@
 #
 # Oracle Linux DTrace.
-# Copyright (c) 2009, 2023, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2026, Oracle and/or its affiliates. All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at
 # http://oss.oracle.com/licenses/upl.
 
@@ -8,8 +8,11 @@ LIBDTRACE_1.0 {
     global:
 	dtrace_addr2str;
 	dtrace_aggregate_clear;
+	dtrace_aggregate_keys;
+	dtrace_aggregate_key_free;
 	dtrace_aggregate_print;
 	dtrace_aggregate_snap;
+	dtrace_aggregate_value;
 	dtrace_aggregate_walk;
 	dtrace_aggregate_walk_joined;
 	dtrace_aggregate_walk_keyrevsorted;

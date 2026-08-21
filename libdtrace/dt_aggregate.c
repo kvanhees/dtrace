@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -13,11 +13,15 @@
 #include <assert.h>
 #include <alloca.h>
 #include <limits.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <libproc.h>
 #include <port.h>
 #include <dt_aggregate.h>
 #include <dt_bpf.h>
+#include <math.h>
+#include <limits.h>
 
 typedef struct dt_ahashent {
 	struct dt_ahashent *dtahe_prev;		/* prev on hash chain */
@@ -43,6 +47,519 @@ struct dt_aggregate {
 };
 
 #define	DTRACE_AHASHSIZE	32779		/* big 'ol prime */
+
+static int
+dt_aggregate_read_signed(const char *addr, size_t size, int64_t *value)
+{
+	int8_t v8;
+	int16_t v16;
+	int32_t v32;
+	int64_t v64;
+
+	switch (size) {
+	case sizeof(v8):
+		memcpy(&v8, addr, sizeof(v8));
+		*value = v8;
+		return 0;
+	case sizeof(v16):
+		memcpy(&v16, addr, sizeof(v16));
+		*value = v16;
+		return 0;
+	case sizeof(v32):
+		memcpy(&v32, addr, sizeof(v32));
+		*value = v32;
+		return 0;
+	case sizeof(v64):
+		memcpy(&v64, addr, sizeof(v64));
+		*value = v64;
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+static int
+dt_aggregate_read_unsigned(const char *addr, size_t size, uint64_t *value)
+{
+	uint8_t v8;
+	uint16_t v16;
+	uint32_t v32;
+	uint64_t v64;
+
+	switch (size) {
+	case sizeof(v8):
+		memcpy(&v8, addr, sizeof(v8));
+		*value = v8;
+		return 0;
+	case sizeof(v16):
+		memcpy(&v16, addr, sizeof(v16));
+		*value = v16;
+		return 0;
+	case sizeof(v32):
+		memcpy(&v32, addr, sizeof(v32));
+		*value = v32;
+		return 0;
+	case sizeof(v64):
+		memcpy(&v64, addr, sizeof(v64));
+		*value = v64;
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+int
+dtrace_aggregate_value(const dtrace_aggdata_t *aggdata, dtrace_aggvalue_t *value)
+{
+	const dtrace_aggdesc_t *agg;
+	const dtrace_recdesc_t *rec;
+	const char *addr;
+	uint64_t normal;
+
+	if (aggdata == NULL || aggdata->dtada_desc == NULL ||
+	    aggdata->dtada_data == NULL || value == NULL)
+		return aggdata && aggdata->dtada_hdl ?
+			dt_set_errno(aggdata->dtada_hdl, EINVAL) : -1;
+
+	agg = aggdata->dtada_desc;
+	rec = &agg->dtagd_drecs[DT_AGGDATA_RECORD];
+	addr = aggdata->dtada_data + rec->dtrd_offset;
+	normal = agg->dtagd_normal ? agg->dtagd_normal : 1;
+	value->dtagv_action = rec->dtrd_action;
+	value->dtagv_normal = normal;
+	value->dtagv_bucket_count = 0;
+
+	switch (rec->dtrd_action) {
+	case DT_AGG_AVG: {
+		const int64_t *data = (const int64_t *)addr;
+
+		if (rec->dtrd_size < sizeof(*data) * 2)
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		value->dtagv_kind = DTRACE_AGGVALUE_FLOAT;
+		value->dtagv_value.real = data[0] == 0 ? 0.0 :
+			(double)((long double)data[1] / normal / data[0]);
+		return 0;
+	}
+	case DT_AGG_STDDEV: {
+		uint64_t data[4];
+
+		if (rec->dtrd_size < sizeof(data))
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		memcpy(data, addr, sizeof(data));
+		value->dtagv_kind = DTRACE_AGGVALUE_UNSIGNED;
+		value->dtagv_value.unsigned_integer =
+			data[0] == 0 ? 0 : dt_stddev(data, normal);
+		return 0;
+	}
+	case DT_AGG_SUM:
+	case DT_AGG_MIN:
+	case DT_AGG_MAX:
+		value->dtagv_kind = DTRACE_AGGVALUE_INTEGER;
+		if (dt_aggregate_read_signed(addr, rec->dtrd_size,
+					     &value->dtagv_value.integer) != 0)
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		value->dtagv_value.integer /= (int64_t)normal;
+		return 0;
+	case DT_AGG_COUNT:
+		value->dtagv_kind = DTRACE_AGGVALUE_UNSIGNED;
+		if (dt_aggregate_read_unsigned(addr, rec->dtrd_size,
+			    &value->dtagv_value.unsigned_integer) != 0)
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		value->dtagv_value.unsigned_integer /= normal;
+		return 0;
+	case DT_AGG_QUANTIZE: {
+		const int64_t *data = (const int64_t *)addr;
+		size_t i, nbins = rec->dtrd_size / sizeof(*data);
+
+		if (rec->dtrd_size % sizeof(*data) != 0 ||
+		    value->dtagv_buckets == NULL ||
+		    value->dtagv_bucket_capacity < nbins)
+			return dt_set_errno(aggdata->dtada_hdl, EINVAL);
+		for (i = 0; i < nbins; i++) {
+			if (data[i] < 0)
+				return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		}
+		for (i = 0; i < nbins; i++) {
+			if (data[i] == 0)
+				continue;
+			value->dtagv_buckets[value->dtagv_bucket_count].bucket =
+				DTRACE_QUANTIZE_BUCKETVAL((uint64_t)i);
+			value->dtagv_buckets[value->dtagv_bucket_count].count =
+				(uint64_t)(data[i] / (int64_t)normal);
+			if (value->dtagv_buckets[value->dtagv_bucket_count].count != 0)
+				value->dtagv_bucket_count++;
+		}
+		value->dtagv_kind = DTRACE_AGGVALUE_QUANTIZED;
+		return 0;
+	}
+	case DT_AGG_LQUANTIZE: {
+		uint16_t levels = DTRACE_LQUANTIZE_LEVELS(agg->dtagd_sig);
+		uint16_t step = DTRACE_LQUANTIZE_STEP(agg->dtagd_sig);
+		int32_t base = DTRACE_LQUANTIZE_BASE(agg->dtagd_sig);
+		size_t i, nbins = (size_t)levels + 2;
+		const int64_t *data = (const int64_t *)addr;
+
+		if (rec->dtrd_size != nbins * sizeof(*data) ||
+		    value->dtagv_buckets == NULL ||
+		    value->dtagv_bucket_capacity < nbins)
+			return dt_set_errno(aggdata->dtada_hdl, EINVAL);
+		for (i = 0; i < nbins; i++) {
+			if (data[i] < 0)
+				return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		}
+		for (i = 0; i < nbins; i++) {
+			int64_t count = data[i] / (int64_t)normal;
+			int64_t bucket;
+
+			if (count == 0)
+				continue;
+			if (i == 0)
+				bucket = base - 1;
+			else if (i == levels + 1)
+				bucket = base + (int64_t)levels * step;
+			else
+				bucket = base + (int64_t)(i - 1) * step;
+			value->dtagv_buckets[value->dtagv_bucket_count++] =
+				(dtrace_aggvalue_bucket_t){ bucket, (uint64_t)count };
+		}
+		value->dtagv_kind = DTRACE_AGGVALUE_QUANTIZED;
+		return 0;
+	}
+	case DT_AGG_LLQUANTIZE: {
+		int factor = DTRACE_LLQUANTIZE_FACTOR(agg->dtagd_sig);
+		int lmag = DTRACE_LLQUANTIZE_LMAG(agg->dtagd_sig);
+		int hmag = DTRACE_LLQUANTIZE_HMAG(agg->dtagd_sig);
+		int steps = DTRACE_LLQUANTIZE_STEPS(agg->dtagd_sig);
+		int steps_factor, bin0;
+		size_t i, nbins;
+		const int64_t *data = (const int64_t *)addr;
+		long double limit = (long double)INT64_MAX;
+
+		if (factor < 2 || steps < factor || lmag > hmag)
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		steps_factor = steps / factor;
+		bin0 = 1 + (hmag - lmag + 1) * (steps - steps_factor);
+		nbins = (size_t)(hmag - lmag + 1) *
+			(steps - steps_factor) * 2 + 3;
+		if (!isfinite((double)powl(factor, hmag + 1)) ||
+		    powl(factor, hmag + 1) > limit)
+			return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+
+		if (rec->dtrd_size != nbins * sizeof(*data) ||
+		    value->dtagv_buckets == NULL ||
+		    value->dtagv_bucket_capacity < nbins)
+			return dt_set_errno(aggdata->dtada_hdl, EINVAL);
+		for (i = 0; i < nbins; i++) {
+			if (data[i] < 0)
+				return dt_set_errno(aggdata->dtada_hdl, EDT_BADAGG);
+		}
+		for (i = 0; i < nbins; i++) {
+			int64_t count = data[i] / (int64_t)normal;
+			int64_t bucket;
+			int left, negative, remaining, magnitude;
+
+			if (count == 0)
+				continue;
+			if (i == 0)
+				bucket = -(int64_t)powl(factor, hmag + 1);
+			else if (i == nbins - 1)
+				bucket = (int64_t)powl(factor, hmag + 1);
+			else if (i == (size_t)bin0)
+				bucket = 0;
+			else {
+				left = (int)i - bin0;
+				negative = left < 0;
+				remaining = negative ? bin0 - (int)i : left;
+				magnitude = lmag;
+				if (lmag == 0 && steps > factor) {
+					for (int n = 2; n <= factor && remaining > 0; n++) {
+						remaining -= steps_factor;
+						if (remaining == 0) {
+							bucket = negative ? -n : n;
+							goto ll_have_bucket;
+						}
+					}
+					magnitude++;
+				}
+				bucket = negative ? -1 : 1;
+				while (magnitude <= hmag) {
+					int64_t scale = (int64_t)(powl(factor, magnitude + 1) /
+						(double)steps);
+					int n;
+
+					for (n = steps_factor + 1; n <= steps; n++) {
+						if (--remaining == 0) {
+							bucket = n * scale * (negative ? -1 : 1);
+							goto ll_have_bucket;
+						}
+					}
+					magnitude++;
+				}
+				bucket *= (int64_t)powl(factor, hmag + 1);
+			}
+ll_have_bucket:
+			value->dtagv_buckets[value->dtagv_bucket_count++] =
+				(dtrace_aggvalue_bucket_t){ bucket, (uint64_t)count };
+		}
+		value->dtagv_kind = DTRACE_AGGVALUE_QUANTIZED;
+		return 0;
+	}
+	default:
+		value->dtagv_kind = DTRACE_AGGVALUE_RAW;
+		value->dtagv_value.raw.data = addr;
+		value->dtagv_value.raw.size = rec->dtrd_size;
+		return 0;
+	}
+}
+
+void dtrace_aggregate_key_free(dtrace_aggkey_t *key)
+{
+	size_t i;
+
+	if (!key)
+		return;
+	switch (key->dtagk_kind) {
+	case DTRACE_AGGKEY_BYTES:
+		free(key->dtagk_value.bytes.data);
+		break;
+	case DTRACE_AGGKEY_STRING:
+	case DTRACE_AGGKEY_SYMBOL:
+	case DTRACE_AGGKEY_MODULE:
+		free(key->dtagk_value.name);
+		break;
+	case DTRACE_AGGKEY_ADDRESS:
+		break;
+	case DTRACE_AGGKEY_STACK:
+		for (i = 0; i < key->dtagk_value.stack.depth; i++)
+			free(key->dtagk_value.stack.frames[i]);
+		free(key->dtagk_value.stack.frames);
+		break;
+	default:
+		break;
+	}
+	memset(key, 0, sizeof(*key));
+}
+
+int dtrace_aggregate_keys(const dtrace_aggdata_t *data,
+			  dtrace_aggkey_t *keys, size_t num_keys)
+{
+	int error = EDT_NOMEM;
+	dtrace_hdl_t *dtp;
+	size_t i, n;
+
+	if (!data || !data->dtada_desc)
+		return data && data->dtada_hdl ?
+			dt_set_errno(data->dtada_hdl, EINVAL) : -1;
+	dtp = data->dtada_hdl;
+	if (data->dtada_desc->dtagd_nkrecs == 0)
+		return 0;
+	n = data->dtada_desc->dtagd_nkrecs - 1;
+	if (n == 0)
+		return 0;
+	if (!data->dtada_key)
+		return dt_set_errno(dtp, EDT_BADAGG);
+	if (!keys || num_keys < n)
+		return dt_set_errno(dtp, EINVAL);
+	memset(keys, 0, n * sizeof(*keys));
+
+	for (i = 0; i < n; i++) {
+		const dtrace_recdesc_t *rec = &data->dtada_desc->dtagd_krecs[i + 1];
+		char *addr = data->dtada_key + rec->dtrd_offset;
+		if ((size_t)rec->dtrd_offset > data->dtada_desc->dtagd_ksize ||
+		    rec->dtrd_size > data->dtada_desc->dtagd_ksize -
+		    (size_t)rec->dtrd_offset)
+			goto badagg;
+
+		switch (rec->dtrd_action) {
+		case DTRACEACT_STACK:
+		case DTRACEACT_USTACK:
+		case DTRACEACT_JSTACK: {
+			uint32_t depth, max, frames, j, tgid = 0;
+
+			if (rec->dtrd_size < 2 * sizeof(uint64_t) ||
+			    (rec->dtrd_action != DTRACEACT_STACK &&
+			     rec->dtrd_size < 4 * sizeof(uint64_t)))
+				goto badagg;
+			memcpy(&depth, addr, sizeof(depth));
+			max = rec->dtrd_size >= 2 * sizeof(uint64_t) ?
+				rec->dtrd_size / sizeof(uint64_t) - 2 : 0;
+			frames = depth < max ? depth : max;
+			if (rec->dtrd_action != DTRACEACT_STACK) {
+				memcpy(&tgid, addr + 3 * sizeof(uint32_t),
+				       sizeof(tgid));
+			}
+
+			keys[i].dtagk_kind = DTRACE_AGGKEY_STACK;
+			keys[i].dtagk_value.stack.frames = frames == 0 ? NULL :
+				calloc(frames, sizeof(char *));
+			keys[i].dtagk_value.stack.depth = 0;
+			if (frames != 0 && !keys[i].dtagk_value.stack.frames)
+				goto error;
+			for (j = 0; j < frames; j++) {
+				char text[PATH_MAX * 2];
+				uint64_t pc;
+				int rc;
+
+				memcpy(&pc, addr + (j + 2) * sizeof(uint64_t),
+				       sizeof(pc));
+				if (pc == 0)
+					break;
+				rc = rec->dtrd_action == DTRACEACT_STACK ?
+					dtrace_addr2str(dtp, pc, text,
+							sizeof(text)) :
+					dtrace_uaddr2str(dtp, tgid, pc,
+							 text, sizeof(text));
+				if (rc < 0) {
+					error = EDT_BADAGG;
+					goto error;
+				}
+				if (!(keys[i].dtagk_value.stack.frames[j] = strdup(text)))
+					goto error;
+				keys[i].dtagk_value.stack.depth++;
+			}
+			break;
+		}
+		case DTRACEACT_SYM:
+		case DTRACEACT_MOD: {
+			dtrace_syminfo_t info;
+			char text[PATH_MAX * 2];
+			uint64_t pc;
+
+			memcpy(&pc, addr, sizeof(pc));
+
+			if (dtrace_lookup_by_addr(dtp, pc,
+						  NULL, &info) == 0) {
+				snprintf(text, sizeof(text), "%s%s%s",
+					 info.object,
+					 rec->dtrd_action == DTRACEACT_SYM ? "`" : "",
+					 rec->dtrd_action == DTRACEACT_SYM ? info.name : "");
+			} else {
+				snprintf(text, sizeof(text), "0x%llx",
+					(unsigned long long)pc);
+			}
+			keys[i].dtagk_kind = rec->dtrd_action == DTRACEACT_SYM ?
+				DTRACE_AGGKEY_SYMBOL : DTRACE_AGGKEY_MODULE;
+			keys[i].dtagk_value.name = strdup(text);
+			if (!keys[i].dtagk_value.name)
+				goto error;
+			break;
+		}
+		case DTRACEACT_UADDR:
+		case DTRACEACT_USYM:
+		case DTRACEACT_UMOD: {
+			char text[PATH_MAX * 2];
+			uint32_t tgid;
+			uint64_t pc;
+
+			/*
+			 * The target PID occupies the first word and the address
+			 * the second; the record is aligned to 64 bits.
+			 */
+			if (rec->dtrd_size < 2 * sizeof(uint64_t))
+				goto badagg;
+			memcpy(&tgid, addr, sizeof(tgid));
+			memcpy(&pc, addr + sizeof(uint64_t), sizeof(pc));
+			if (rec->dtrd_action == DTRACEACT_UADDR) {
+				keys[i].dtagk_kind = DTRACE_AGGKEY_ADDRESS;
+				keys[i].dtagk_value.user_address.pid = tgid;
+				keys[i].dtagk_value.user_address.address = pc;
+				break;
+			}
+
+			if (dtrace_uaddr2str(dtp, tgid, pc, text,
+				     sizeof(text)) < 0)
+				goto badagg;
+			if (rec->dtrd_action == DTRACEACT_UMOD) {
+				char *tick = strchr(text, '`');
+				if (tick)
+					*tick = '\0';
+			}
+			keys[i].dtagk_kind = rec->dtrd_action == DTRACEACT_USYM ?
+				 DTRACE_AGGKEY_SYMBOL : DTRACE_AGGKEY_MODULE;
+			keys[i].dtagk_value.name = strdup(text);
+			if (!keys[i].dtagk_value.name)
+				goto error;
+			break;
+		}
+		default:
+			keys[i].dtagk_kind = DTRACE_AGGKEY_INTEGER;
+			switch (rec->dtrd_size) {
+			case 1: {
+				int8_t v;
+
+				memcpy(&v, addr, 1);
+				keys[i].dtagk_value.integer = v;
+				break;
+			}
+			case 2: {
+				int16_t v;
+
+				memcpy(&v, addr, 2);
+				keys[i].dtagk_value.integer = v;
+				break;
+			}
+			case 4: {
+				int32_t v;
+
+				memcpy(&v, addr, 4);
+				keys[i].dtagk_value.integer = v;
+				break;
+			}
+			case 8: {
+				int64_t v;
+
+				memcpy(&v, addr, 8);
+				keys[i].dtagk_value.integer = v;
+				break;
+			}
+			default: {
+				char *nul = memchr(addr, '\0', rec->dtrd_size);
+
+				/*
+				 * This is a heuristic: key descriptors do not
+				 * retain type information.  DTrace strings are
+				 * NUL-terminated and padded with zeros to their
+				 * fixed record size.
+				 */
+				if (nul != NULL) {
+					char *p;
+
+					for (p = nul + 1; p < addr + rec->dtrd_size; p++) {
+						if (*p != '\0')
+							break;
+					}
+					if (p == addr + rec->dtrd_size) {
+						keys[i].dtagk_kind = DTRACE_AGGKEY_STRING;
+						keys[i].dtagk_value.name = strndup(addr,
+									   rec->dtrd_size);
+						if (!keys[i].dtagk_value.name)
+							goto error;
+						break;
+					}
+				}
+				keys[i].dtagk_kind = DTRACE_AGGKEY_BYTES;
+				keys[i].dtagk_value.bytes.data = malloc(rec->dtrd_size);
+				if (!keys[i].dtagk_value.bytes.data)
+					goto error;
+				memcpy(keys[i].dtagk_value.bytes.data, addr,
+				       rec->dtrd_size);
+				keys[i].dtagk_value.bytes.size = rec->dtrd_size;
+				break;
+			}
+			}
+			break;
+		}
+	}
+	return (int)n;
+error:
+	for (i = 0; i < n; i++)
+		dtrace_aggregate_key_free(&keys[i]);
+	return dt_set_errno(dtp, error);
+badagg:
+	for (i = 0; i < n; i++)
+		dtrace_aggregate_key_free(&keys[i]);
+	return dt_set_errno(dtp, EDT_BADAGG);
+}
 
 /*
  * Because qsort(3C) does not allow an argument to be passed to a comparison

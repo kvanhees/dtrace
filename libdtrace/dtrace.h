@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -378,6 +378,89 @@ struct dtrace_aggdata {
 	caddr_t dtada_data;			/* pointer to data */
 	caddr_t *dtada_percpu;			/* per CPU data, if avail */
 };
+
+typedef enum dtrace_aggvalue_kind {
+	DTRACE_AGGVALUE_INTEGER,
+	DTRACE_AGGVALUE_UNSIGNED,
+	DTRACE_AGGVALUE_FLOAT,
+	DTRACE_AGGVALUE_RAW,
+	DTRACE_AGGVALUE_QUANTIZED
+} dtrace_aggvalue_kind_t;
+
+typedef struct dtrace_aggvalue_bucket {
+	int64_t bucket;
+	uint64_t count;
+} dtrace_aggvalue_bucket_t;
+
+/* Quantized buckets are supplied by the caller through dtagv_buckets. */
+typedef struct dtrace_aggvalue {
+	dtrace_aggvalue_kind_t dtagv_kind;
+	uint16_t dtagv_action;
+	uint64_t dtagv_normal;
+	dtrace_aggvalue_bucket_t *dtagv_buckets;
+	size_t dtagv_bucket_capacity;
+	size_t dtagv_bucket_count;
+	union {
+		int64_t integer;
+		uint64_t unsigned_integer;
+		double real;
+		struct {
+			const void *data;
+			size_t size;
+		} raw;
+	} dtagv_value;
+} dtrace_aggvalue_t;
+
+typedef enum dtrace_aggkey_kind {
+	DTRACE_AGGKEY_INTEGER,
+	DTRACE_AGGKEY_STRING,
+	DTRACE_AGGKEY_BYTES,
+	DTRACE_AGGKEY_STACK,
+	DTRACE_AGGKEY_SYMBOL,
+	DTRACE_AGGKEY_MODULE,
+	DTRACE_AGGKEY_USER_ADDRESS,
+	DTRACE_AGGKEY_ADDRESS = DTRACE_AGGKEY_USER_ADDRESS
+} dtrace_aggkey_kind_t;
+
+typedef struct dtrace_aggkey {
+	dtrace_aggkey_kind_t dtagk_kind;
+	union {
+		int64_t integer;
+		struct {
+			char *data;
+			size_t size;
+		} bytes;
+		struct {
+			char **frames;
+			size_t depth;
+		} stack;
+		char *name;
+		/* User addresses include the target PID to disambiguate ASLR. */
+		struct {
+			uint32_t pid;
+			uint64_t address;
+		} user_address;
+	} dtagk_value;
+} dtrace_aggkey_t;
+
+/*
+ * Decode all keys in an aggregation snapshot.  The caller supplies an array
+ * with capacity for dtagd_nkrecs - 1 descriptors.  Returned strings, byte
+ * buffers, and stack frames are owned by the caller and must be released
+ * with dtrace_aggregate_key_free().  Zero-key aggregations return zero.
+ */
+extern int dtrace_aggregate_keys(const dtrace_aggdata_t *, dtrace_aggkey_t *,
+				 size_t);
+extern void dtrace_aggregate_key_free(dtrace_aggkey_t *);
+
+/*
+ * Decode one aggregation value.  Integer values can be signed or unsigned.
+ * Raw data points into the snapshot and is valid only while that snapshot
+ * remains valid.  Quantized values require a caller-provided bucket array and
+ * capacity.
+ */
+extern int dtrace_aggregate_value(const dtrace_aggdata_t *,
+				  dtrace_aggvalue_t *);
 
 typedef struct dtrace_print_aggdata {
 	dtrace_hdl_t *dtpa_dtp;			/* handle to DTrace library */
