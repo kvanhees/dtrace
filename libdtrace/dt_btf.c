@@ -933,8 +933,12 @@ dt_btf_module_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	if (!dtp->dt_shared_ctf && dtp->dt_shared_btf && btf == dtp->dt_shared_btf)
 		dtp->dt_shared_ctf = ctf;
 
-	dt_dprintf("Generated %s CTF from BTF (%d types).\n", dmp->dm_name,
-		   btf->type_cnt);
+	if (btf == dtp->dt_shared_btf && strcmp(dmp->dm_name, "vmlinux") != 0)
+		dt_dprintf("Created %s CTF import from shared vmlinux BTF.\n",
+		    dmp->dm_name);
+	else
+		dt_dprintf("Generated %s CTF from BTF (%d types).\n", dmp->dm_name,
+		    btf->type_cnt);
 #endif
 
 	return ctf;

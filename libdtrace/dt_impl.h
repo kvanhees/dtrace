@@ -202,6 +202,7 @@ typedef struct dt_kern_path {
 #define DT_DM_KERNEL		0x2	/* module is associated with a kernel object */
 #define DT_DM_CTF_ARCHIVED	0x4	/* module found in a CTF archive */
 #define DT_DM_KERN_UNLOADED	0x8	/* module not loaded into the kernel */
+#define DT_DM_KERN_BUILTIN	0x10	/* module is linked into vmlinux */
 
 /*
  * Why do we need (only) 4 slots?  The maximum amount of string arguments to

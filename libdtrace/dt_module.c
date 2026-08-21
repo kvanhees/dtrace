@@ -1236,6 +1236,19 @@ dt_kern_module_find_btf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	if (dtp->dt_shared_btf == NULL && strcmp(dmp->dm_name, "vmlinux") != 0)
 		return;
 
+	/*
+	 * modules.builtin.ranges identifies this object as linked into vmlinux.
+	 * Such objects cannot have a per-module BTF object, so use the shared
+	 * vmlinux BTF directly.  Retain the usual lookup for an explicitly
+	 * configured BTF directory and every other module.
+	 */
+	if (dtp->dt_btf_path == NULL && (dmp->dm_flags & DT_DM_KERN_BUILTIN)) {
+		dmp->dm_btf = dtp->dt_shared_btf;
+		dt_dprintf("Using shared vmlinux BTF for built-in module %s.\n",
+		    dmp->dm_name);
+		return;
+	}
+
 	dt_dprintf("Loading BTF for module %s.\n", dmp->dm_name);
 
 	/*
@@ -1776,6 +1789,7 @@ dt_modsym_update(dtrace_hdl_t *dtp, const char *line, dt_kasstate_t *state)
 {
 	dt_kallsym_t	sym;
 	char		*modname;
+	int		builtin = 0;
 
 	if ((line[0] == '\n') || (line[0] == 0))
 		return 0;
@@ -1811,8 +1825,10 @@ dt_modsym_update(dtrace_hdl_t *dtp, const char *line, dt_kasstate_t *state)
 			char	*s;
 
 			s = dt_kasstate_modname(state, sym.addr, sym.name);
-			if (s != NULL)
+			if (s != NULL) {
 				strncpy(sym.mod, s, PATH_MAX);
+				builtin = 1;
+			}
 		}
 	}
 
@@ -1882,6 +1898,8 @@ dt_modsym_update(dtrace_hdl_t *dtp, const char *line, dt_kasstate_t *state)
 			if (err != 0)
 				return err;
 		}
+		if (builtin)
+			dmp->dm_flags |= DT_DM_KERN_BUILTIN;
 
 		err = dt_modsym_addsym(dtp, dmp, &sym, state);
 		if (err != 0)
