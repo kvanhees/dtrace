@@ -29,6 +29,8 @@
 # By default, do not build with 32-on-64 support.
 %define glibc32 %{nil}
 
+%global pcp_targetdir %{?pcp_targetdir}%{!?pcp_targetdir:/var/lib/pcp/pmdas/dtrace}
+
 # Enable it for non-ARM64 builds excpet for OL10.
 # ARM64 does not support 32-on-64 either.
 %ifnarch aarch64
@@ -41,6 +43,7 @@
 %global _lto_cflags %{nil}
 
 %bcond_without python
+%bcond_without pcp
 
 BuildRequires: rpm
 Name:         dtrace
@@ -146,6 +149,17 @@ Python extension module providing access to libdtrace.
 
 %endif
 
+%if %{with pcp} && %{with python}
+%package -n pcp-pmda-dtrace
+Summary:      PCP PMDA for DTrace
+Requires:     python3-dtrace = %{version}-%{release}
+Requires:     python3-pcp
+Group:        Applications/System
+
+%description -n pcp-pmda-dtrace
+Performance Co-Pilot PMDA for exposing DTrace data as metrics.
+%endif
+
 Installed in /usr/lib64/dtrace/testsuite.
 
 'make check' here is just like 'make check' in the source tree, except that
@@ -158,9 +172,14 @@ it always tests the installed DTrace.
 %if %{with python}
 %global python_build_args WITH_PYTHON=y PYTHON=%{__python3}
 %else
-%global python_build_args %{nil}
+%global python_build_args WITH_PYTHON=n
 %endif
-make -j $(getconf _NPROCESSORS_ONLN) %{bpfc} %{maybe_use_fuse2} %{python_build_args}
+%if %{with pcp} && %{with python}
+%global pcp_build_args WITH_PCP=y
+%else
+%global pcp_build_args WITH_PCP=n
+%endif
+make -j $(getconf _NPROCESSORS_ONLN) %{bpfc} %{maybe_use_fuse2} %{python_build_args} %{pcp_build_args}
 
 # Force off debuginfo splitting.  We have no debuginfo in dtrace proper,
 # and the testsuite requires debuginfo for proper operation.
@@ -176,11 +195,20 @@ mkdir -p $RPM_BUILD_ROOT/usr/sbin
 %if %{with python}
 %global python_install_args install-python PYTHON=%{__python3}
 %else
-%global python_install_args %{nil}
+%global python_install_args WITH_PYTHON=n
+%endif
+%if %{with pcp} && %{with python}
+%global pcp_install_args WITH_PCP=y PMDA_OBJDIR="$RPM_BUILD_ROOT%{pcp_targetdir}"
+%else
+%global pcp_install_args WITH_PCP=n
 %endif
 make DESTDIR=$RPM_BUILD_ROOT VERSION=%{version} \
      HDRPREFIX="$RPM_BUILD_ROOT/usr/include" \
-     install install-test %{python_install_args}
+     %{pcp_install_args} install install-test %{python_install_args}
+
+%if %{without pcp} || %{without python}
+rm -rf "$RPM_BUILD_ROOT%{pcp_targetdir}"
+%endif
 
 %if "%{?dist}" == ".el7"
 sed -i '/^ProtectSystem=/d; /^ProtectControlGroups=/d; /^RuntimeDirectory/d;' $RPM_BUILD_ROOT/usr/lib/systemd/system/dtprobed.service
@@ -221,6 +249,13 @@ fi
 
 %preun
 %systemd_preun dtprobed.service
+
+%if %{with pcp} && %{with python}
+%preun -n pcp-pmda-dtrace
+if [ "$1" -eq 0 ] && [ -f "%{pcp_targetdir}/Remove" ]; then
+    (cd "%{pcp_targetdir}" && ./Remove >/dev/null 2>&1) || :
+fi
+%endif
 
 %postun
 /sbin/ldconfig
@@ -264,6 +299,20 @@ systemctl start dtprobed || :
 %defattr(-,root,root,-)
 %{python3_sitearch}/dtrace*.so
 %doc bindings/python/README.md
+%endif
+%if %{with pcp} && %{with python}
+%files -n pcp-pmda-dtrace
+%defattr(-,root,root,-)
+%dir %{pcp_targetdir}
+%{pcp_targetdir}/Install
+%{pcp_targetdir}/Remove
+%{pcp_targetdir}/pmdadtrace.python
+%{pcp_targetdir}/README.md
+%config(noreplace) %{pcp_targetdir}/dtrace.conf
+%{_mandir}/man1/pmdadtrace.1.gz
+%dir %{pcp_targetdir}/autostart
+%dir %{pcp_targetdir}/examples
+%{pcp_targetdir}/examples/*
 %endif
 %files testsuite
 %defattr(-,root,root,-)
