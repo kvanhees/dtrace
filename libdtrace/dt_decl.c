@@ -233,10 +233,8 @@ dt_decl_spec(ushort_t kind, char *name)
 	ddp->dd_kind = kind;
 	ddp->dd_name = name;
 
-	if (name != NULL && strchr(name, '`') != NULL) {
-		xyerror(D_DECL_SCOPE, "D scoping operator may not be used "
-		    "in a type name\n");
-	}
+	if (name != NULL && dt_scope_parse(name, NULL, NULL) < 0)
+		xyerror(D_SYNTAX, "syntax error near \"%s\"\n", name);
 
 	return dt_decl_check(ddp);
 }

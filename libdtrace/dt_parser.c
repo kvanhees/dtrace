@@ -168,45 +168,96 @@ opstr(int op)
 	}
 }
 
+/*
+ * Parse the D scoping mark used in external type and symbol names.  A scoped
+ * name can contain one mark only: ` for kernel scope, or `` for user scope.
+ * Longer runs and repeated marks are malformed.  Return the scope kind as 0
+ * for no scope, 1 for kernel scope, or 2 for user scope.
+ */
+int
+dt_scope_parse(const char *s, const char **scopep, const char **identp)
+{
+	static const char delimiters[] = " \t\n\r\v\f*";
+	const char *mark = strchr(s, '`');
+	const char *scope;
+	size_t marklen = 1;
+
+	if (mark == NULL) {
+		if (scopep != NULL)
+			*scopep = DTRACE_OBJ_EXEC;
+		if (identp != NULL)
+			*identp = s;
+		return 0;
+	}
+
+	if (mark[1] == '`') {
+		marklen = 2;
+		if (mark[2] == '`')
+			return -1;
+	}
+
+	if (mark[marklen] == '\0')
+		return -1;
+
+	if (strchr(mark + marklen, '`') != NULL)
+		return -1;
+
+	for (scope = mark;
+	    scope > s && strchr(delimiters, scope[-1]) == NULL; )
+		scope--;
+
+	if (scope == mark)
+		scope = marklen == 2 ? DTRACE_OBJ_UMODS : DTRACE_OBJ_KMODS;
+
+	if (scopep != NULL)
+		*scopep = scope;
+	if (identp != NULL)
+		*identp = mark + marklen;
+
+	return marklen;
+}
+
 int
 dt_type_lookup(const char *s, dtrace_typeinfo_t *tip)
 {
-	static const char delimiters[] = " \t\n\r\v\f*`";
 	dtrace_hdl_t *dtp = yypcb->pcb_hdl;
-	const char *p, *q, *end, *obj;
+	const char *scope, *ident, *start, *obj;
+	int scopekind;
 
-	for (p = s, end = s + strlen(s); *p != '\0'; p = q) {
-		while (isspace(*p))
-			p++;	/* skip leading whitespace prior to token */
+	scopekind = dt_scope_parse(s, &scope, &ident);
+	if (scopekind < 0)
+		return dt_set_errno(dtp, EDT_BADSCOPE);
 
-		if (p == end || (q = strpbrk(p + 1, delimiters)) == NULL)
-			break;	/* empty string or single token remaining */
+	if (scopekind > 0) {
+		char *type;
 
-		if (*q == '`') {
-			char *object = alloca((size_t)(q - p) + 1);
-			char *type = alloca((size_t)(end - s) + 1);
+		/*
+		 * If there is no explicit object before the mark, search all
+		 * kernel or user objects depending on the mark width.
+		 */
+		if (scope == DTRACE_OBJ_KMODS || scope == DTRACE_OBJ_UMODS) {
+			start = ident - scopekind;
+			obj = scope;
+		} else {
+			size_t objlen = (size_t)(ident - scope) - scopekind;
+			char *object = alloca(objlen + 1);
 
-			/*
-			 * Copy from the start of the token (p) to the location
-			 * backquote (q) to extract the nul-terminated object.
-			 */
-			memcpy(object, p, (size_t)(q - p));
-			object[(size_t)(q - p)] = '\0';
-
-			/*
-			 * Copy the original string up to the start of this
-			 * token (p) into type, and then concatenate everything
-			 * after q.  This is the type name without the object.
-			 */
-			memcpy(type, s, (size_t)(p - s));
-			memcpy(type + (size_t)(p - s), q + 1,
-			    strlen(q + 1) + 1);
-
-			if (strchr(q + 1, '`') != NULL)
-				return dt_set_errno(dtp, EDT_BADSCOPE);
-
-			return dtrace_lookup_by_type(dtp, object, type, tip);
+			memcpy(object, scope, objlen);
+			object[objlen] = '\0';
+			start = scope;
+			obj = object;
 		}
+
+		/*
+		 * Copy the original string up to the start of this token
+		 * into type, and then concatenate everything after the scoping
+		 * mark.  This is the type name without the object and mark.
+		 */
+		type = alloca((size_t)(start - s) + strlen(ident) + 1);
+		memcpy(type, s, (size_t)(start - s));
+		memcpy(type + (size_t)(start - s), ident, strlen(ident) + 1);
+
+		return dtrace_lookup_by_type(dtp, obj, type, tip);
 	}
 
 	if (yypcb->pcb_idepth != 0)
@@ -2767,9 +2818,10 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 	dtrace_syminfo_t dts;
 	GElf_Sym sym;
 
-	const char *scope, *mark;
+	const char *scope, *ident, *markstr;
 	uchar_t dnkind;
 	char *name;
+	int scopekind;
 
 	/*
 	 * Look for scoping marks in the identifier.  If one is found, set our
@@ -2779,18 +2831,16 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 	 * Otherwise we set scope to DTRACE_OBJ_EXEC, indicating that normal
 	 * scope is desired and we should search the specified idhash.
 	 */
-	if ((name = strrchr(dnp->dn_string, '`')) != NULL) {
-		if (name > dnp->dn_string && name[-1] == '`') {
-			uref++;
-			name[-1] = '\0';
-		}
+	scopekind = dt_scope_parse(dnp->dn_string, &scope, &ident);
+	if (scopekind < 0) {
+		xyerror(D_SYNTAX, "syntax error near \"%s\"\n",
+		    dnp->dn_string);
+	}
 
-		if (name == dnp->dn_string + uref)
-			scope = uref ? DTRACE_OBJ_UMODS : DTRACE_OBJ_KMODS;
-		else
-			scope = dnp->dn_string;
-
-		*name++ = '\0'; /* leave name pointing after scoping mark */
+	if (scopekind > 0) {
+		uref = scopekind == 2;
+		name = (char *)ident;
+		*(char *)(ident - scopekind) = '\0';
 		dnkind = DT_NODE_VAR;
 
 	} else if (idkind == DT_IDENT_AGG) {
@@ -2810,7 +2860,7 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 	 * errno appropriately and that error will be reported instead.
 	 */
 	dt_set_errno(dtp, EDT_NOVAR);
-	mark = uref ? "``" : "`";
+	markstr = uref ? "``" : "`";
 
 	if (scope == DTRACE_OBJ_EXEC && (
 	    (dhp != dtp->dt_globals &&
@@ -2902,13 +2952,13 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 				xyerror(D_SYM_MODEL, "cannot use %s symbol "
 					"%s%s%s in a %s D program\n",
 					dt_module_modelname(mp), dts.object,
-					mark, dts.name,
+					markstr, dts.name,
 					dt_module_modelname(dtp->dt_ddefs));
 			}
 
 			xyerror(D_SYM_NOTYPES, "no symbolic type information "
 				"is available for %s%s%s: %s\n",
-				dts.object, mark, dts.name,
+				dts.object, markstr, dts.name,
 				dtrace_errmsg(dtp, dtrace_errno(dtp)));
 		}
 
@@ -3014,7 +3064,7 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 
 	} else if (scope != DTRACE_OBJ_EXEC) {
 		xyerror(D_IDENT_UNDEF, "failed to resolve %s%s%s: %s\n",
-		    dnp->dn_string, mark, name,
+		    dnp->dn_string, markstr, name,
 		    dtrace_errmsg(dtp, dtrace_errno(dtp)));
 	} else {
 		xyerror(D_IDENT_UNDEF, "failed to resolve %s: %s\n",
