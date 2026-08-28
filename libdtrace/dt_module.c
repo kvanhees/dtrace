@@ -71,6 +71,9 @@ dt_user_path_add(dtrace_hdl_t *dtp, dt_htab_t *h, char *s)
 {
 	dt_path_t	tmpl, *path;
 
+	if (s == NULL)
+		return -1;
+
 	tmpl.str = s;
 	if (dt_htab_lookup(h, &tmpl) != NULL) {
 		free(s);
@@ -88,6 +91,7 @@ dt_user_path_add(dtrace_hdl_t *dtp, dt_htab_t *h, char *s)
 		goto fail;
 	}
 
+	dt_dprintf("Adding user module path %s\n", path->str);
 	dt_list_append(&dtp->dt_user_path, path);
 
 	return 0;
@@ -109,14 +113,14 @@ dt_user_path_add_env(dtrace_hdl_t *dtp, dt_htab_t *h, const char *env)
 	for (;;) {
 		end = strchr(str, ':');
 		if (end == NULL) {
+			/*
+			 * A trailing empty path component denotes the current
+			 * directory.
+			 */
 			if (*str == '\0')
-				if (dt_user_path_add(dtp, h, strdup(".")) == -1)
-					return -1;
+				return dt_user_path_add(dtp, h, strdup("."));
 
-			if (dt_user_path_add(dtp, h, strdup(str)) == -1)
-				return -1;
-
-			break;
+			return dt_user_path_add(dtp, h, strdup(str));
 		}
 
 		if (end == str) {
@@ -142,14 +146,19 @@ dt_user_path_init(dtrace_hdl_t *dtp)
 	char		*str, *end;
 	int		rc = 0;
 
+	if (h == NULL)
+		goto fail;
+
 	/* Add paths from $LD_LIBRARY_PATH. */
 	if (dt_user_path_add_env(dtp, h, "LD_LIBRARY_PATH") != 0)
 		goto fail;
 
 	/* Add paths from ld.so.cache (using ldconfig -p output). */
 	fp = popen("/sbin/ldconfig -p", "r");
-	if (fp == NULL)
-		goto fail;
+	if (fp == NULL) {
+		dt_dprintf("Failed to get paths from ldconfig\n");
+		goto path;
+	}
 
 	while (getline(&buf, &len, fp) != -1) {
 		/* We are interested in lines like: <something> => /path */
@@ -182,6 +191,7 @@ dt_user_path_init(dtrace_hdl_t *dtp)
 	if (rc == -1)
 		goto fail;
 
+path:
 	/* Add paths from $PATH. */
 	if (dt_user_path_add_env(dtp, h, "PATH") != 0)
 		goto fail;
@@ -195,6 +205,8 @@ dt_user_path_init(dtrace_hdl_t *dtp)
 
 fail:
 	dt_htab_destroy(h);
+	dt_user_path_destroy(dtp);
+	dt_set_errno(dtp, ENOMEM);
 	return -1;
 }
 
@@ -328,6 +340,8 @@ dt_module_create(dtrace_hdl_t *dtp, const char *name)
 		dmp->dm_ops = &dt_modops_32;
 	dmp->dm_dtp = dtp;
 
+	dt_dprintf("created module %s\n", dmp->dm_name);
+
 	return dmp;
 }
 
@@ -341,14 +355,16 @@ dt_module_create_user(dtrace_hdl_t *dtp, const char *name)
 {
 	dt_module_t	*dmp;
 	char		*file = NULL;
+	char		*p;
 
 	if (name == NULL || name[0] == '\0') {
 		dt_set_errno(dtp, EINVAL);
 		return NULL;
 	}
 
-	if (dt_list_empty(&dtp->dt_user_path))
-		dt_user_path_init(dtp);
+	if (dt_list_empty(&dtp->dt_user_path) && dt_user_path_init(dtp) == -1)
+		return NULL;
+
 	if (!dt_list_empty(&dtp->dt_user_path)) {
 		dt_path_t	*path;
 
@@ -366,10 +382,18 @@ dt_module_create_user(dtrace_hdl_t *dtp, const char *name)
 		}
 
 		if (file == NULL) {
-			dt_set_errno(dtp, ENOENT);
+			dt_set_errno(dtp, EDT_NOMOD);
 			return NULL;
 		}
 	}
+
+	/*
+	 * Use the resolved pathname as the object location, but name it based
+	 * on just the filename.
+	 */
+	p = strrchr(name, '/');
+	if (p != NULL)
+		name = p + 1;
 
 	if (strlen(name) >= DTRACE_MODNAMELEN ||
 	    strlen(file) >= sizeof(dmp->dm_file)) {
@@ -445,7 +469,7 @@ dt_module_init_elf_impl(dtrace_hdl_t *dtp, dt_module_t *dmp,
 	if (dmp->dm_file[0] == '\0') {
 		dt_dprintf("failed to open ELF file for module %s: "
 		    "no file name known\n", dmp->dm_name);
-		return dt_set_errno(dtp, EDT_NOTLOADED);
+		return dt_set_errno(dtp, EDT_NOMOD);
 	}
 
 	if ((fd = open(dmp->dm_file, O_RDONLY)) == -1) {
@@ -512,7 +536,7 @@ dt_module_load_sect(dtrace_hdl_t *dtp, dt_module_t *dmp, ctf_sect_t *ctsp)
 	Elf_Scn *sp;
 
 	if (elf_getshdrstrndx(dmp->dm_elf, &shstrs) == -1)
-		return dt_set_errno(dtp, EDT_NOTLOADED);
+		return dt_set_errno(dtp, EDT_NOMOD);
 
 	for (sp = NULL; (sp = elf_nextscn(dmp->dm_elf, sp)) != NULL; ) {
 		if (gelf_getshdr(sp, &sh) == NULL || sh.sh_type == SHT_NULL ||

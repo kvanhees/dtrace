@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -211,6 +211,7 @@ extern dt_node_t *dt_node_tstring(dt_node_t *, uintmax_t);
 extern dt_node_t *dt_node_link(dt_node_t *, dt_node_t *);
 extern dt_node_t *dt_node_cook(dt_node_t *, uint_t);
 extern void dt_cook_taint_alloca(dt_node_t *, dt_ident_t *, dt_node_t *);
+extern int dt_scope_parse(const char *, const char **, const char **);
 
 extern dt_node_t *dt_node_xalloc(dtrace_hdl_t *, int);
 extern void dt_node_free(dt_node_t *);

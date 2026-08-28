@@ -1,5 +1,5 @@
 # Oracle Linux DTrace.
-# Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at
 # http://oss.oracle.com/licenses/upl.
 
@@ -105,6 +105,9 @@ proc-tst-omp_CFLAGS := -fopenmp
 proc-tst-omp_LDFLAGS := -fopenmp
 proc-tst-pthread-exec_CFLAGS := -pthread
 proc-tst-pthread-exec_LIBS := -pthread
+
+# Userspace scoped-type tests need type information in this executable.
+testprobe_CFLAGS := -gctf
 
 # readwholedir is used for ustack() tests, so needs a symbol table and needs
 # all its functions in it, even if they would be sibcalled out of existence.
