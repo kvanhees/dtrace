@@ -1,0 +1,47 @@
+diff --git a/cmd/Build b/cmd/Build
+index 98d0ebd7..3492638d 100644
+--- a/cmd/Build
++++ b/cmd/Build
+@@ -13,7 +13,7 @@ dtrace_SOURCES = dtrace.c
+ dtrace_DEPS = libdtrace.so libport.a
+ dtrace_SRCDEPS := $(objdir)/dt_git_version.h
+ ifdef HAVE_LIBCTF
+-dtrace_LIBS = -ldtrace -lctf -lport -lelf
++dtrace_LIBS = -ldtrace -lctf-nobfd -lport -lelf
+ else
+ dtrace_LIBS = -ldtrace -ldtrace-ctf -lport -lelf
+ endif
+diff --git a/libdtrace/Build b/libdtrace/Build
+index 3a6c0466..3bf6c7c0 100644
+--- a/libdtrace/Build
++++ b/libdtrace/Build
+@@ -82,10 +82,16 @@ SHLIBS += libdtrace
+ libdtrace_DIR := $(current-dir)
+ libdtrace_TARGET = libdtrace
+ ifdef HAVE_LIBCTF
+-libdtrace_LIBS := -lctf
++libdtrace_LIBS := -lctf-nobfd
+ else
+ libdtrace_LIBS := -ldtrace-ctf
+ endif
++
++# Required for dt_pid.c for varying instruction lengths on x86
++ifeq ($(shell uname -m), x86_64)
++libdtrace_LIBS += -lopcodes_pic -lbfd_pic -lsframe  -liberty
++endif
++
+ libdtrace_LIBS += -lelf -lz -lrt -lpcap -lpthread -ldl -lm -lpfm
+ libdtrace_VERSION := 2.0.0
+ libdtrace_SONAME := libdtrace.so.2
+@@ -93,11 +99,6 @@ libdtrace_VERSCRIPT := libdtrace.ver
+ libdtrace_LIBSOURCES := libdtrace-build libproc libport libcommon
+ libdtrace_SECONDARY := libproc libport
+ 
+-# Required for dt_pid.c for varying instruction lengths on x86
+-ifeq ($(shell uname -m), x86_64)
+-libdtrace_LIBS += -lopcodes
+-endif
+-
+ # Disable certain warnings for these files
+ dt_bpf.c_CFLAGS := -Wno-pedantic
+ dt_btf.c_CFLAGS := -Wno-pedantic

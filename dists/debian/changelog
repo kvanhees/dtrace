@@ -1,0 +1,36 @@
+dtrace (2.0.7-3) unstable; urgency=medium
+
+  * Mark the build verbose.  (Closes: #1140824)
+  [ Matthias Klose ]
+  * Really suppress adding utsname info in USDT ELF notes.  (Closes: #1140167)
+
+ -- Kris Van Hees <kvanhees@gmail.com>  Mon, 29 Jun 2026 13:35:02 -0400
+
+dtrace (2.0.7-2) unstable; urgency=medium
+
+  * Apply fixes in control file.  (Closes: #1140165)
+  * Use static linking for libbinutils.  (Closes: #1140166, #1140168)
+  * Surpress adding utsname info in USDT ELF notes.  (Closes: #1140167)
+
+ -- Kris Van Hees <kvanhees@gmail.com>  Tue, 16 Jun 2026 19:46:35 -0400
+
+dtrace (2.0.7-1) unstable; urgency=medium
+
+  * Fix CVE-2026-21996: divide-by-zero if section header data corruped.
+  * Fix CVE-2026-35233: OOB memory access.  (Closes: #1135619)
+
+ -- Kris Van Hees <kvanhees@gmail.com>  Tue, 12 May 2026 17:55:24 -0400
+
+dtrace (2.0.6-1) unstable; urgency=medium
+
+  * Fix CVE-2026-21991: dtprobed unsafe probe description handling.
+  * Limit building to supported architectures. (Closes: #1129637)
+  * Remove unnecessary dependency ob binutils-bpf. (Closes: #1131271)
+
+ -- Kris Van Hees <kvanhees@gmail.com>  Tue, 17 Mar 2026 17:53:17 -0400
+
+dtrace (2.0.5-1) unstable; urgency=medium
+
+  * Initial release. (Closes: #1128435)
+
+ -- Kris Van Hees <kvanhees@gmail.com>  Fri, 20 Feb 2026 00:31:21 -0500
