@@ -440,6 +440,11 @@ dt_decl_ptr(void)
 dt_decl_t *
 dt_decl_sou(uint_t kind, char *name)
 {
+	if (name != NULL && strchr(name, '`') != NULL) {
+		xyerror(D_DECL_SCOPE, "D scoping operator may not be used "
+		    "in a type name\n");
+	}
+
 	dt_decl_t *ddp = dt_decl_spec(kind, name);
 	char n[DT_TYPE_NAMELEN];
 	ctf_file_t *ctfp;
@@ -637,6 +642,11 @@ dt_decl_hasmembers(const char *name, int value, void *private)
 dt_decl_t *
 dt_decl_enum(char *name)
 {
+	if (name != NULL && strchr(name, '`') != NULL) {
+		xyerror(D_DECL_SCOPE, "D scoping operator may not be used "
+		    "in a type name\n");
+	}
+
 	dt_decl_t *ddp = dt_decl_spec(CTF_K_ENUM, name);
 	char n[DT_TYPE_NAMELEN];
 	ctf_file_t *ctfp;
