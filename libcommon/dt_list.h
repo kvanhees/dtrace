@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -19,6 +19,7 @@ typedef struct dt_list {
 
 #define	dt_list_prev(elem)	((void *)(((dt_list_t *)(elem))->dl_prev))
 #define	dt_list_next(elem)	((void *)(((dt_list_t *)(elem))->dl_next))
+#define dt_list_empty(elem)	(dt_list_next(elem) == NULL)
 
 #define dt_in_list(l, e)	(dt_list_next(l) == (e) || dt_list_prev(e))
 
