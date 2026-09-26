@@ -8,7 +8,7 @@
 #               and generated intermediate representation.
 #
 # Oracle Linux DTrace.
-# Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
 # Licensed under the Universal Permissive License v 1.0 as shown at
 # http://oss.oracle.com/licenses/upl.
 
@@ -510,6 +510,7 @@ postprocess()
     # values which are not continuously variable.
 
     sed -e '/^==[0-9][0-9]*== /!s,0x[0-9a-f][0-9a-f]*,{ptr},g' \
+	-e '/^BPF: verification time /d' \
 	-e 's,at BPF pc [1-9][0-9]*,at BPF pc NNN,' < $tmpdir/pp.out > $final
 
     return $retval
