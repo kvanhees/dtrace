@@ -257,6 +257,14 @@ dt_type_lookup(const char *s, dtrace_typeinfo_t *tip)
 		memcpy(type, s, (size_t)(start - s));
 		memcpy(type + (size_t)(start - s), ident, strlen(ident) + 1);
 
+		if (scopekind == 2 && obj != DTRACE_OBJ_UMODS) {
+			dt_module_t *dmp = dt_module_create_user(dtp, obj);
+
+			if (dmp == NULL)
+				return -1;
+			obj = dmp->dm_name;
+		}
+
 		return dtrace_lookup_by_type(dtp, obj, type, tip);
 	}
 
@@ -2832,17 +2840,14 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 	 * scope is desired and we should search the specified idhash.
 	 */
 	scopekind = dt_scope_parse(dnp->dn_string, &scope, &ident);
-	if (scopekind < 0) {
-		xyerror(D_SYNTAX, "syntax error near \"%s\"\n",
-		    dnp->dn_string);
-	}
+	if (scopekind < 0)
+		xyerror(D_SYNTAX, "syntax error near \"%s\"\n", dnp->dn_string);
 
 	if (scopekind > 0) {
 		uref = scopekind == 2;
 		name = (char *)ident;
 		*(char *)(ident - scopekind) = '\0';
 		dnkind = DT_NODE_VAR;
-
 	} else if (idkind == DT_IDENT_AGG) {
 		scope = DTRACE_OBJ_EXEC;
 		name = dnp->dn_string + 1;
@@ -2861,6 +2866,17 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 	 */
 	dt_set_errno(dtp, EDT_NOVAR);
 	markstr = uref ? "``" : "`";
+
+	if (uref && scope != DTRACE_OBJ_UMODS) {
+		dt_module_t *dmp = dt_module_create_user(dtp, scope);
+
+		if (dmp == NULL) {
+			xyerror(D_IDENT_UNDEF, "failed to resolve %s%s%s: %s\n",
+			    dnp->dn_string, markstr, name,
+			    dtrace_errmsg(dtp, dtrace_errno(dtp)));
+		}
+		scope = dmp->dm_name;
+	}
 
 	if (scope == DTRACE_OBJ_EXEC && (
 	    (dhp != dtp->dt_globals &&
@@ -2925,14 +2941,11 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 			dt_cook_taint_alloca(dnp, idp, NULL);
 
 		dt_node_attr_assign(dnp, attr);
-
 	} else if (dhp == dtp->dt_globals && scope != DTRACE_OBJ_EXEC &&
 	    dtrace_lookup_by_name(dtp, scope, name, &sym, &dts) == 0) {
-
 		dt_module_t *mp = dt_module_lookup_by_name(dtp, dts.object);
 		int umod = (mp->dm_flags & DT_DM_KERNEL) == 0;
 		static const char *const kunames[] = { "kernel", "user" };
-
 		dtrace_typeinfo_t dtt;
 		dtrace_syminfo_t *sip;
 
@@ -2992,7 +3005,6 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 			idp->di_flags |= DT_IDFLG_USER;
 			dnp->dn_flags |= DT_NF_USERLAND;
 		}
-
 	} else if (scope == DTRACE_OBJ_EXEC && create == B_TRUE) {
 		uint_t flags = DT_IDFLG_WRITE;
 		uint_t id;
@@ -3061,15 +3073,13 @@ dt_xcook_ident(dt_node_t *dnp, dt_idhash_t *dhp, uint_t idkind, int create)
 			dt_cook_taint_alloca(dnp, idp, NULL);
 
 		dt_node_attr_assign(dnp, attr);
-
 	} else if (scope != DTRACE_OBJ_EXEC) {
 		xyerror(D_IDENT_UNDEF, "failed to resolve %s%s%s: %s\n",
 		    dnp->dn_string, markstr, name,
 		    dtrace_errmsg(dtp, dtrace_errno(dtp)));
-	} else {
+	} else
 		xyerror(D_IDENT_UNDEF, "failed to resolve %s: %s\n",
 		    dnp->dn_string, dtrace_errmsg(dtp, dtrace_errno(dtp)));
-	}
 }
 
 static dt_node_t *
