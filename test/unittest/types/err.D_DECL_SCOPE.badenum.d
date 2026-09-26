@@ -6,13 +6,14 @@
  */
 
 /*
- * ASSERTION: Test a bogus enum declaration using an invalid identifer.
+ * ASSERTION:
+ *   Test a bogus enum declaration using an invalid identifer.
  *
  * SECTION: Type and Constant Definitions/Enumerations
  */
 
 
-enum foo.bar
+enum foo`bar
 {
 
 };

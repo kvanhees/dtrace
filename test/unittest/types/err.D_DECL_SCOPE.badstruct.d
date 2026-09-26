@@ -6,13 +6,12 @@
  */
 
 /*
- * ASSERTION: Test a bogus enum declaration using an invalid identifer.
+ * ASSERTION:
+ *   Attempt a bogus struct declaration using an invalid identifer.
  *
- * SECTION: Type and Constant Definitions/Enumerations
+ * SECTION: Structs and Unions/Structs
  */
 
-
-enum foo.bar
-{
+struct foo`bar {
 
 };
