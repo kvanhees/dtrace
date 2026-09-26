@@ -9,6 +9,7 @@
 
 BEGIN
 {
+	trace(sizeof(struct pid));
 	trace(*(struct pid *)`cad_pid);
 	exit(0);
 }
