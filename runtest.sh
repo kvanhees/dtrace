@@ -510,6 +510,7 @@ postprocess()
     # values which are not continuously variable.
 
     sed -e '/^==[0-9][0-9]*== /!s,0x[0-9a-f][0-9a-f]*,{ptr},g' \
+	-e '/^BPF: verification time /d' \
 	-e 's,at BPF pc [1-9][0-9]*,at BPF pc NNN,' < $tmpdir/pp.out > $final
 
     return $retval
