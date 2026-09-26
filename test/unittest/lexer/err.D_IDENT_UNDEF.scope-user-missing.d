@@ -5,18 +5,15 @@
  * http://oss.oracle.com/licenses/upl.
  */
 
-/* @@trigger: testprobe */
-/* @@runtest-opts: -e -xlinkmode=static */
-
 /*
- * ASSERTION: Explicit userspace module scoping resolves as a userspace
- * external symbol reference.
+ * ASSERTION: An explicitly-scoped userspace symbol reports a lookup error
+ * when its module cannot be found.
  */
 
 #pragma D option quiet
 
 BEGIN
 {
-	trace(&testprobe``main);
+	trace(no_such_module``main);
 	exit(0);
 }
