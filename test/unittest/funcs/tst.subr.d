@@ -14,8 +14,17 @@
 	BEGIN				\
 	/*DSTYLED*/			\
 	{				\
+		this->ival = (long)(x);	\
 		subr++;			\
-		@[(long)x] = sum(1);	\
+	/*DSTYLED*/			\
+	}
+
+#define AINTFUNC(x)			\
+	BEGIN				\
+	/*DSTYLED*/			\
+	{				\
+		subr++;			\
+		this->aval = (long)(x);	\
 	/*DSTYLED*/			\
 	}
 
@@ -24,7 +33,7 @@
 	/*DSTYLED*/			\
 	{				\
 		subr++;			\
-		@str[x] = sum(1);	\
+		this->sval = (x);	\
 	/*DSTYLED*/			\
 	}
 
@@ -55,14 +64,14 @@ INTFUNC(mutex_type_spin((struct mutex *)&`bpf_verifier_lock))
 INTFUNC(rw_read_held((rwlock_t *)&`tasklist_lock))
 INTFUNC(rw_write_held((rwlock_t *)&`tasklist_lock))
 INTFUNC(rw_iswriter((rwlock_t *)&`tasklist_lock))
-INTFUNC(copyin(0, 1))
+AINTFUNC(copyin(0, 1))
 STRFUNC(copyinstr(0, 1))
 INTFUNC(speculation())
 INTFUNC(progenyof($pid))
 INTFUNC(strlen("fooey"))
 VOIDFUNC(copyout)
 VOIDFUNC(copyoutstr)
-INTFUNC(alloca(10))
+AINTFUNC(alloca(10))
 VOIDFUNC(bcopy)
 VOIDFUNC(copyinto)
 /* Not implemented.
