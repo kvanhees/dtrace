@@ -6,19 +6,12 @@
  */
 
 /*
- * ASSERTION: Identifiers cannot begin with a digit
+ * ASSERTION:
+ *   Attempt a bogus struct declaration using an invalid identifer.
  *
- * SECTION: Types, Operators, and Expressions/Identifier Names and Keywords
+ * SECTION: Structs and Unions/Structs
  */
 
+struct foo`bar {
 
-#pragma D option quiet
-
-int 0abc;
-
-BEGIN
-{
-	0abc = 5;
-	printf("0abc is %d", 0abc);
-	exit(0);
-}
+};

@@ -11,6 +11,8 @@
  *      after -> and after ., even with comments interjected.
  */
 
+#pragma D option quiet
+
 BEGIN
 {
 	printf("%p\n", &(*(struct cgroup_root *)&`cgrp_dfl_root).cgrp.self);
