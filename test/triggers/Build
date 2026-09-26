@@ -106,6 +106,9 @@ proc-tst-omp_LDFLAGS := -fopenmp
 proc-tst-pthread-exec_CFLAGS := -pthread
 proc-tst-pthread-exec_LIBS := -pthread
 
+# Userspace scoped-type tests need type information in this executable.
+testprobe_CFLAGS := -gctf
+
 # readwholedir is used for ustack() tests, so needs a symbol table and needs
 # all its functions in it, even if they would be sibcalled out of existence.
 readwholedir_CFLAGS := -fno-inline -fno-optimize-sibling-calls

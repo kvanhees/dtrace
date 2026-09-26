@@ -1,6 +1,6 @@
 /*
  * Oracle Linux DTrace.
- * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, 2026, Oracle and/or its affiliates. All rights reserved.
  * Licensed under the Universal Permissive License v 1.0 as shown at
  * http://oss.oracle.com/licenses/upl.
  */
@@ -17,9 +17,19 @@
 #include <stdio.h>
 #include <unistd.h>
 
+/* Keep a named type in the executable's CTF for userspace type-lookup tests. */
+struct dtrace_scope_test_type {
+    int value;
+};
+
+static struct dtrace_scope_test_type dtrace_scope_test_instance;
+
 int main(int argc, char *argv[])
 {
     int fd, i;
+
+    /* Prevent optimization from discarding the test type. */
+    dtrace_scope_test_instance.value = argc;
 
     if ((fd = open("/dev/dtrace/provider/dt_test", O_RDONLY)) == -1) {
         perror("open");

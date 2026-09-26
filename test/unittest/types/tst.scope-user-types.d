@@ -9,14 +9,16 @@
 /* @@runtest-opts: -e -xlinkmode=static */
 
 /*
- * ASSERTION: Explicit userspace module scoping resolves as a userspace
- * external symbol reference.
+ * ASSERTION: Explicit and implicit userspace type scopes, and the implicit
+ * kernel type scope, resolve external types.
  */
 
 #pragma D option quiet
 
 BEGIN
 {
-	trace(&testprobe``main);
+	scope_explicit = (struct testprobe``dtrace_scope_test_type *)NULL;
+	scope_implicit = (struct ``dtrace_scope_test_type *)NULL;
+	scope_kernel = (struct `task_struct *)NULL;
 	exit(0);
 }
