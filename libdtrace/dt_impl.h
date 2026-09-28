@@ -307,6 +307,7 @@ struct dtrace_hdl {
 	dt_htab_t *dt_kernsyms; /* htab of kernel symbol names */
 	char *dt_ctfa_path;	/* path to vmlinux.ctfa */
 	ctf_archive_t *dt_ctfa; /* ctf archive for the entire kernel tree */
+	void *dt_ctfa_data;	/* backing data for dt_ctfa */
 	char *dt_btf_path;	/* path to vmlinux.btf */
 	struct dt_btf *dt_shared_btf; /* BTF data for the kernel (shared) */
 	ctf_file_t *dt_shared_ctf; /* Handle to the shared CTF */

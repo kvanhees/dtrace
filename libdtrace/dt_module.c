@@ -194,8 +194,16 @@ dt_module_lookup_by_ctf(dtrace_hdl_t *dtp, ctf_file_t *ctfp)
 	return ctfp ? ctf_getspecific(ctfp) : NULL;
 }
 
+static void
+dt_module_delete_registered(dtrace_hdl_t *dtp, dt_module_t *dmp)
+{
+	if (dt_module_lookup_by_name(dtp, dmp->dm_name) == dmp)
+		dt_htab_delete(dtp->dt_mods, dmp);
+}
+
 static int
-dt_module_init_elf(dtrace_hdl_t *dtp, dt_module_t *dmp)
+dt_module_init_elf_impl(dtrace_hdl_t *dtp, dt_module_t *dmp,
+    int unregister_on_error)
 {
 	int fd, err, bits;
 	size_t shstrs;
@@ -226,7 +234,8 @@ dt_module_init_elf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	    elf_getshdrstrndx(dmp->dm_elf, &shstrs) == -1) {
 		dt_dprintf("failed to load %s: %s\n", dmp->dm_file,
 		    elf_errmsg(elf_errno()));
-		dt_htab_delete(dtp->dt_mods, dmp);
+		if (unregister_on_error)
+			dt_module_delete_registered(dtp, dmp);
 		return dt_set_errno(dtp, EDT_OBJIO);
 	}
 
@@ -242,7 +251,8 @@ dt_module_init_elf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	default:
 		dt_dprintf("failed to load %s: unknown ELF class\n",
 		    dmp->dm_file);
-		dt_htab_delete(dtp->dt_mods, dmp);
+		if (unregister_on_error)
+			dt_module_delete_registered(dtp, dmp);
 		return dt_set_errno(dtp, EDT_ELFCLASS);
 	}
 
@@ -250,6 +260,12 @@ dt_module_init_elf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 	    dmp->dm_file);
 
 	return 0;
+}
+
+static int
+dt_module_init_elf(dtrace_hdl_t *dtp, dt_module_t *dmp)
+{
+	return dt_module_init_elf_impl(dtp, dmp, 1);
 }
 
 static int
@@ -296,6 +312,91 @@ dt_module_load_sect(dtrace_hdl_t *dtp, dt_module_t *dmp, ctf_sect_t *ctsp)
 
 	return 0;
 }
+
+#ifdef HAVE_LIBCTF
+/*
+ * libctf-nobfd cannot use the BFD-backed ctf_arc_open() helper, so extract
+ * the .ctf section ourselves and open that with ctf_arc_bufopen().
+ */
+static ctf_archive_t *
+dt_ctfa_open(dtrace_hdl_t *dtp, const char *ctfa_name)
+{
+	ctf_archive_t	*ctfa = NULL;
+	ctf_sect_t	ctsp = { 0 };
+	dt_module_t	*dmp;
+	char		dm_file[PATH_MAX];
+	const dt_modops_t	*dm_ops;
+	Elf		*dm_elf;
+	void		*ctfa_data = NULL;
+
+	dmp = dtp->dt_exec;
+	if (dmp == NULL || strcmp(dmp->dm_name, "vmlinux") != 0)
+		dmp = dt_module_lookup_by_name(dtp, "vmlinux");
+	if (dmp == NULL) {
+		dtp->dt_ctferr = ECTF_INTERNAL;
+		return NULL;
+	}
+
+	/*
+	 * Borrow the registered vmlinux module as the ELF loader context, but
+	 * leave its persistent module state exactly as we found it.
+	 */
+	memcpy(dm_file, dmp->dm_file, sizeof(dm_file));
+	dm_ops = dmp->dm_ops;
+	dm_elf = dmp->dm_elf;
+
+	if (strlcpy(dmp->dm_file, ctfa_name, sizeof(dmp->dm_file)) >=
+	    sizeof(dmp->dm_file)) {
+		dtp->dt_ctferr = ENAMETOOLONG;
+		goto out;
+	}
+
+	errno = 0;
+	if (dt_module_init_elf_impl(dtp, dmp, 0) != 0) {
+		dtp->dt_ctferr = errno != 0 ? errno : ECTF_FMT;
+		goto out;
+	}
+
+	ctsp.cts_name = ".ctf";
+	ctsp.cts_entsize = 0;
+
+	if (dt_module_load_sect(dtp, dmp, &ctsp) == -1) {
+		dtp->dt_ctferr = ECTF_FMT;
+		goto out;
+	}
+
+	if (ctsp.cts_data == NULL || ctsp.cts_size == 0) {
+		dtp->dt_ctferr = ECTF_NOCTFDATA;
+		goto out;
+	}
+
+	ctfa_data = malloc(ctsp.cts_size);
+	if (ctfa_data == NULL) {
+		dtp->dt_ctferr = errno;
+		goto out;
+	}
+	memcpy(ctfa_data, ctsp.cts_data, ctsp.cts_size);
+	ctsp.cts_data = ctfa_data;
+
+	ctfa = ctf_arc_bufopen(&ctsp, NULL, NULL, &dtp->dt_ctferr);
+	if (ctfa != NULL) {
+		free(dtp->dt_ctfa_data);
+		dtp->dt_ctfa_data = ctfa_data;
+		ctfa_data = NULL;
+	}
+
+out:
+	free(ctfa_data);
+	if (dmp->dm_elf != dm_elf) {
+		if (dmp->dm_elf != NULL)
+			elf_end(dmp->dm_elf);
+		dmp->dm_elf = dm_elf;
+	}
+	dmp->dm_ops = dm_ops;
+	memcpy(dmp->dm_file, dm_file, sizeof(dmp->dm_file));
+	return ctfa;
+}
+#endif
 
 /*
  * Only used for linked-in modules.  Archived modules are uncompressed
@@ -928,7 +1029,11 @@ dt_kern_module_find_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 		} else
 			ctfa_name = dtp->dt_ctfa_path;
 
+#ifdef HAVE_LIBCTF
+		dtp->dt_ctfa = dt_ctfa_open(dtp, ctfa_name);
+#else
 		dtp->dt_ctfa = ctf_arc_open(ctfa_name, &dtp->dt_ctferr);
+#endif
 		if (dtp->dt_ctfa != NULL) {
 			/*
 			 * Load in the shared CTF immediately.
@@ -941,6 +1046,8 @@ dt_kern_module_find_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 				    ctfa_name, ctf_errmsg(dtp->dt_ctferr));
 				ctf_arc_close(dtp->dt_ctfa);
 				dtp->dt_ctfa = NULL;
+				free(dtp->dt_ctfa_data);
+				dtp->dt_ctfa_data = NULL;
 			} else {
 				dt_dprintf("Loaded shared CTF from archive %s.\n",
 				    ctfa_name);
@@ -958,7 +1065,7 @@ dt_kern_module_find_ctf(dtrace_hdl_t *dtp, dt_module_t *dmp)
 			 * data for shared_ctf from.
 			 */
 			mod = dt_module_lookup_by_name(dtp, "vmlinux");
-			if (mod->dm_btf != NULL) {
+			if (mod != NULL && mod->dm_btf != NULL) {
 				dt_kern_module_ctf_from_btf(dtp, mod);
 				dtp->dt_shared_ctf = mod->dm_ctfp;
 			} else

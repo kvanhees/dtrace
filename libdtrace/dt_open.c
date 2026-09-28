@@ -1321,6 +1321,7 @@ dtrace_close(dtrace_hdl_t *dtp)
 		ctf_close(dtp->dt_shared_ctf);
 	if (dtp->dt_ctfa != NULL)
 		ctf_arc_close(dtp->dt_ctfa);
+	free(dtp->dt_ctfa_data);
 
 	dt_pcap_destroy(dtp);
 
