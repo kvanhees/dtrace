@@ -1,4 +1,4 @@
-#!/usr/bin/sed -Ef
+#!/bin/sed -Ef
 # Fix up DEBUG lines
 s/DEBUG [0-9]+:/DEBUG:/
 s/, [0-9]+\]/, NNN]/
