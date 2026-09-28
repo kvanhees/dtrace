@@ -262,52 +262,6 @@ note_add_version(usdt_elf_t *usdt)
 }
 
 static int
-note_add_utsname(usdt_elf_t *usdt)
-{
-	Elf_Data	*dbuf;
-	char		*buf, *p;
-	size_t		len, sz;
-
-#define UTSN_NOTE_HEADSZ \
-		((3 * sizeof(uint32_t)) +	/* namesz, descsz, type */ \
-		 ALIGN(5, 4))			/* "utsn\0" */
-
-	/* Ensure the note starts on a 4-byte alignment boundary. */
-	usdt->base = ALIGN(usdt->base + usdt->size, 4);
-	usdt->size = 0;
-
-	len = sizeof(struct utsname);
-	sz = UTSN_NOTE_HEADSZ + ALIGN(len, 4);
-
-	buf = malloc(sz);
-	if (buf == NULL)
-		return dt_set_errno(usdt->dtp, EDT_NOMEM);
-	memset(buf, 0, sz);
-
-	/* Construct the note header. */
-	*((uint32_t *)&buf[0]) = 5;
-	*((uint32_t *)&buf[4]) = sz - UTSN_NOTE_HEADSZ;
-	*((uint32_t *)&buf[8]) = 1;
-	memcpy(&buf[12], "utsn", 4);
-
-	/* Add the data. */
-	p = buf + UTSN_NOTE_HEADSZ;
-	memcpy(p, &usdt->dtp->dt_uts, sizeof(struct utsname));
-
-	/* Add the note header. */
-	dbuf = elf_newdata(usdt->note);
-	dbuf->d_align = sizeof(uint32_t);
-	dbuf->d_off = usdt->base;
-	dbuf->d_buf = buf;
-	dbuf->d_size = sz;
-	usdt->size = sz;
-
-	usdt->notes.next = NULL;
-
-	return 0;
-}
-
-static int
 create_elf64(dtrace_hdl_t *dtp, dtrace_prog_t *pgp, int fd, uint_t flags)
 {
 	usdt_elf_t		*usdt;
@@ -397,8 +351,6 @@ create_elf64(dtrace_hdl_t *dtp, dtrace_prog_t *pgp, int fd, uint_t flags)
 
 	if (!(flags & DTRACE_D_STRIP)) {
 		if (note_add_version(usdt) == -1)
-			goto fail;
-		if (note_add_utsname(usdt) == -1)
 			goto fail;
 	}
 
